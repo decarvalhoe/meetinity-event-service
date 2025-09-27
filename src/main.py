@@ -29,13 +29,16 @@ def error_response(status: int, message: str, details=None):
 
 def validate_event(data: dict):
     """Validate event data for creation/update operations.
-    
+
     Args:
         data (dict): Event data to validate.
-        
+
     Returns:
         tuple: (is_valid: bool, errors: dict)
     """
+    if not isinstance(data, dict):
+        return False, {"_schema": ["Objet JSON requis pour l'évènement."]}
+
     errors = {}
 
     title = data.get("title")
@@ -114,6 +117,12 @@ def create_event():
     data = request.get_json(silent=True)
     if data is None:
         return error_response(400, "JSON invalide ou non parsable.")
+
+    if not isinstance(data, dict):
+        return error_response(
+            400,
+            "Payload JSON invalide: un objet JSON est requis.",
+        )
 
     is_valid, errors = validate_event(data)
     if not is_valid:
