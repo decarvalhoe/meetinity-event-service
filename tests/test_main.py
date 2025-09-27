@@ -1,17 +1,10 @@
-from pathlib import Path
-import sys
-
 import pytest
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from src.main import app, _reset_events_storage
+from src.main import app
 
 
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
-    _reset_events_storage()
     with app.test_client() as client:
         yield client
 
@@ -36,7 +29,6 @@ def test_create_event(client):
     assert 'event_id' in response.json
 
 
-<<<<<<< HEAD
 def test_create_and_get_event(client):
     payload = {
         "title": "Evenement Test",
@@ -67,7 +59,15 @@ def test_get_event_not_found(client):
     error = response.json['error']
     assert error['code'] == 404
     assert error['message'] == 'Événement introuvable.'
-=======
+
+
+def test_create_event_with_array_payload(client):
+    response = client.post('/events', json=[{"title": "Invalid"}])
+    assert response.status_code == 400
+    assert response.json['error']['code'] == 400
+    assert 'objet JSON' in response.json['error']['message']
+
+
 def test_create_event_rejects_boolean_attendees(client):
     response = client.post('/events', json={"title": "Bool Event", "attendees": True})
     assert response.status_code == 422
@@ -75,4 +75,3 @@ def test_create_event_rejects_boolean_attendees(client):
     assert response.json["error"]["details"]["attendees"] == [
         "Doit être un entier non booléen >= 0."
     ]
->>>>>>> origin/main

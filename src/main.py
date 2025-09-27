@@ -67,13 +67,16 @@ def error_response(status: int, message: str, details=None):
 
 def validate_event(data: dict):
     """Validate event data for creation/update operations.
-    
+
     Args:
         data (dict): Event data to validate.
-        
+
     Returns:
         tuple: (is_valid: bool, errors: dict)
     """
+    if not isinstance(data, dict):
+        return False, {"_schema": ["Objet JSON requis pour l'évènement."]}
+
     errors = {}
 
     title = data.get("title")
@@ -90,6 +93,20 @@ def validate_event(data: dict):
             errors.setdefault("attendees", []).append(
                 "Doit être un entier non booléen >= 0."
             )
+
+    if "date" in data:
+        date_value = data.get("date")
+        if not isinstance(date_value, str) or not date_value.strip():
+            errors.setdefault("date", []).append(
+                "Doit être une chaîne au format YYYY-MM-DD."
+            )
+        else:
+            try:
+                datetime.strptime(date_value.strip(), "%Y-%m-%d")
+            except ValueError:
+                errors.setdefault("date", []).append(
+                    "Format de date invalide, attendu YYYY-MM-DD."
+                )
 
     return len(errors) == 0, errors
 
@@ -139,16 +156,26 @@ def create_event():
     if data is None:
         return error_response(400, "JSON invalide ou non parsable.")
 
+    if not isinstance(data, dict):
+        return error_response(
+            400,
+            "Payload JSON invalide: un objet JSON est requis.",
+        )
+
     is_valid, errors = validate_event(data)
     if not is_valid:
         return error_response(422, "Validation échouée.", errors)
 
     global _next_event_id
+    
+    provided_date = data.get("date")
+    if isinstance(provided_date, str):
+        provided_date = provided_date.strip()
 
     new_event = {
         "id": _next_event_id,
         "title": data["title"].strip(),
-        "date": data.get("date")
+        "date": provided_date
         or datetime.today().strftime("%Y-%m-%d"),
         "location": data.get("location") or "TBD",
         "type": data.get("type") or "general",
