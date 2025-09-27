@@ -36,6 +36,7 @@ def test_create_event(client):
     assert 'event_id' in response.json
 
 
+<<<<<<< HEAD
 def test_create_and_get_event(client):
     payload = {
         "title": "Evenement Test",
@@ -66,3 +67,12 @@ def test_get_event_not_found(client):
     error = response.json['error']
     assert error['code'] == 404
     assert error['message'] == 'Événement introuvable.'
+=======
+def test_create_event_rejects_boolean_attendees(client):
+    response = client.post('/events', json={"title": "Bool Event", "attendees": True})
+    assert response.status_code == 422
+    assert response.json["error"]["message"] == "Validation échouée."
+    assert response.json["error"]["details"]["attendees"] == [
+        "Doit être un entier non booléen >= 0."
+    ]
+>>>>>>> origin/main
