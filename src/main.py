@@ -10,6 +10,44 @@ from datetime import datetime
 app = Flask(__name__)
 
 
+# In-memory storage for events. This mimics a lightweight persistence layer
+# for the purposes of the current application scope.
+_INITIAL_EVENTS = [
+    {
+        "id": 1,
+        "title": "Networking Night Paris",
+        "date": "2025-08-15",
+        "location": "Paris",
+        "type": "networking",
+        "attendees": 45,
+    },
+    {
+        "id": 2,
+        "title": "Tech Meetup Lyon",
+        "date": "2025-08-20",
+        "location": "Lyon",
+        "type": "tech",
+        "attendees": 32,
+    },
+]
+
+
+def _reset_events_storage():
+    """Reset the in-memory storage to its initial state."""
+    global _events_storage, _next_event_id
+    _events_storage = [event.copy() for event in _INITIAL_EVENTS]
+    _next_event_id = (
+        max(event["id"] for event in _events_storage) + 1
+        if _events_storage
+        else 1
+    )
+
+
+_events_storage = []
+_next_event_id = 1
+_reset_events_storage()
+
+
 def error_response(status: int, message: str, details=None):
     """Create a standardized error response.
     
@@ -90,25 +128,7 @@ def get_events():
     Returns:
         Response: JSON response with events list.
     """
-    events = [
-        {
-            "id": 1,
-            "title": "Networking Night Paris",
-            "date": "2025-08-15",
-            "location": "Paris",
-            "type": "networking",
-            "attendees": 45,
-        },
-        {
-            "id": 2,
-            "title": "Tech Meetup Lyon",
-            "date": "2025-08-20",
-            "location": "Lyon",
-            "type": "tech",
-            "attendees": 32,
-        },
-    ]
-    return jsonify({"events": events})
+    return jsonify({"events": [event.copy() for event in _events_storage]})
 
 
 @app.route("/events", methods=["POST"])
@@ -146,12 +166,14 @@ def create_event():
     if not is_valid:
         return error_response(422, "Validation échouée.", errors)
 
+    global _next_event_id
+    
     provided_date = data.get("date")
     if isinstance(provided_date, str):
         provided_date = provided_date.strip()
 
     new_event = {
-        "id": 123,  # TODO: replace with real ID from database
+        "id": _next_event_id,
         "title": data["title"].strip(),
         "date": provided_date
         or datetime.today().strftime("%Y-%m-%d"),
@@ -159,6 +181,9 @@ def create_event():
         "type": data.get("type") or "general",
         "attendees": data.get("attendees", 0),
     }
+
+    _events_storage.append(new_event)
+    _next_event_id += 1
 
     return (
         jsonify(
@@ -182,16 +207,15 @@ def get_event(event_id):
     Returns:
         Response: JSON response with event details.
     """
-    event = {
-        "id": event_id,
-        "title": "Sample Event",
-        "date": "2025-08-15",
-        "location": "Paris",
-        "description": (
-            "Networking event for professionals"
-        ),
-    }
-    return jsonify({"event": event})
+    event = next(
+        (stored_event for stored_event in _events_storage if stored_event["id"] == event_id),
+        None,
+    )
+
+    if event is None:
+        return error_response(404, "Événement introuvable.")
+
+    return jsonify({"event": event.copy()})
 
 
 @app.errorhandler(404)
