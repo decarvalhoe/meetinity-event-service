@@ -34,3 +34,12 @@ def test_create_event_with_array_payload(client):
     assert response.status_code == 400
     assert response.json['error']['code'] == 400
     assert 'objet JSON' in response.json['error']['message']
+
+
+def test_create_event_rejects_boolean_attendees(client):
+    response = client.post('/events', json={"title": "Bool Event", "attendees": True})
+    assert response.status_code == 422
+    assert response.json["error"]["message"] == "Validation échouée."
+    assert response.json["error"]["details"]["attendees"] == [
+        "Doit être un entier non booléen >= 0."
+    ]

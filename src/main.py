@@ -47,10 +47,28 @@ def validate_event(data: dict):
 
     if "attendees" in data:
         att = data["attendees"]
-        if not isinstance(att, int) or att < 0:
+        if (
+            not isinstance(att, int)
+            or isinstance(att, bool)
+            or att < 0
+        ):
             errors.setdefault("attendees", []).append(
-                "Doit être un entier >= 0."
+                "Doit être un entier non booléen >= 0."
             )
+
+    if "date" in data:
+        date_value = data.get("date")
+        if not isinstance(date_value, str) or not date_value.strip():
+            errors.setdefault("date", []).append(
+                "Doit être une chaîne au format YYYY-MM-DD."
+            )
+        else:
+            try:
+                datetime.strptime(date_value.strip(), "%Y-%m-%d")
+            except ValueError:
+                errors.setdefault("date", []).append(
+                    "Format de date invalide, attendu YYYY-MM-DD."
+                )
 
     return len(errors) == 0, errors
 
@@ -128,10 +146,14 @@ def create_event():
     if not is_valid:
         return error_response(422, "Validation échouée.", errors)
 
+    provided_date = data.get("date")
+    if isinstance(provided_date, str):
+        provided_date = provided_date.strip()
+
     new_event = {
         "id": 123,  # TODO: replace with real ID from database
         "title": data["title"].strip(),
-        "date": data.get("date")
+        "date": provided_date
         or datetime.today().strftime("%Y-%m-%d"),
         "location": data.get("location") or "TBD",
         "type": data.get("type") or "general",
