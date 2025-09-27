@@ -1,11 +1,26 @@
+"""Meetinity Event Service.
+
+This service handles event management, creation, and discovery
+for professional networking events on the Meetinity platform.
+"""
+
 from flask import Flask, jsonify, request
 from datetime import datetime
 
 app = Flask(__name__)
 
 
-# ---------- Utils ----------
 def error_response(status: int, message: str, details=None):
+    """Create a standardized error response.
+    
+    Args:
+        status (int): HTTP status code.
+        message (str): Error message.
+        details (dict, optional): Additional error details.
+        
+    Returns:
+        tuple: JSON response and status code.
+    """
     payload = {"error": {"code": status, "message": message}}
     if details:
         payload["error"]["details"] = details
@@ -13,7 +28,14 @@ def error_response(status: int, message: str, details=None):
 
 
 def validate_event(data: dict):
-    """Retourne (is_valid, errors_dict). Seul 'title' est requis."""
+    """Validate event data for creation/update operations.
+    
+    Args:
+        data (dict): Event data to validate.
+        
+    Returns:
+        tuple: (is_valid: bool, errors: dict)
+    """
     errors = {}
 
     title = data.get("title")
@@ -30,15 +52,23 @@ def validate_event(data: dict):
     return len(errors) == 0, errors
 
 
-# ---------- Routes ----------
 @app.route("/health")
 def health():
+    """Health check endpoint.
+    
+    Returns:
+        Response: JSON response with service status.
+    """
     return jsonify({"status": "ok", "service": "event-service"})
 
 
 @app.route("/events")
 def get_events():
-    """Récupérer la liste des événements"""
+    """Retrieve list of available events.
+    
+    Returns:
+        Response: JSON response with events list.
+    """
     events = [
         {
             "id": 1,
@@ -62,7 +92,20 @@ def get_events():
 
 @app.route("/events", methods=["POST"])
 def create_event():
-    """Créer un nouvel événement"""
+    """Create a new professional event.
+    
+    Expected JSON payload:
+        {
+            "title": str (required),
+            "date": str (optional),
+            "location": str (optional),
+            "type": str (optional),
+            "attendees": int (optional)
+        }
+        
+    Returns:
+        Response: JSON response with created event details.
+    """
     if not request.is_json:
         return error_response(
             415, "Content-Type 'application/json' requis."
@@ -77,7 +120,7 @@ def create_event():
         return error_response(422, "Validation échouée.", errors)
 
     new_event = {
-        "id": 123,  # TODO: remplacer par un ID réel (DB/sequence)
+        "id": 123,  # TODO: replace with real ID from database
         "title": data["title"].strip(),
         "date": data.get("date")
         or datetime.today().strftime("%Y-%m-%d"),
@@ -100,7 +143,14 @@ def create_event():
 
 @app.route("/events/<int:event_id>")
 def get_event(event_id):
-    """Récupérer un événement spécifique (mock)"""
+    """Retrieve details for a specific event.
+    
+    Args:
+        event_id (int): The ID of the event to retrieve.
+        
+    Returns:
+        Response: JSON response with event details.
+    """
     event = {
         "id": event_id,
         "title": "Sample Event",
@@ -113,19 +163,42 @@ def get_event(event_id):
     return jsonify({"event": event})
 
 
-# ---------- Error handlers ----------
 @app.errorhandler(404)
 def handle_404(e):
+    """Handle 404 Not Found errors.
+    
+    Args:
+        e: The error object.
+        
+    Returns:
+        Response: Standardized 404 error response.
+    """
     return error_response(404, "Ressource introuvable.")
 
 
 @app.errorhandler(405)
 def handle_405(e):
+    """Handle 405 Method Not Allowed errors.
+    
+    Args:
+        e: The error object.
+        
+    Returns:
+        Response: Standardized 405 error response.
+    """
     return error_response(405, "Méthode non autorisée pour cette ressource.")
 
 
 @app.errorhandler(500)
 def handle_500(e):
+    """Handle 500 Internal Server Error.
+    
+    Args:
+        e: The error object.
+        
+    Returns:
+        Response: Standardized 500 error response.
+    """
     return error_response(500, "Erreur interne. On respire, on relance.")
 
 
