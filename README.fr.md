@@ -13,6 +13,8 @@ Le Service d'Événements est développé avec **Python Flask** et fournit des c
 - **Découverte d'Événements** : Capacités de recherche et filtrage pour la navigation d'événements
 - **Système d'Inscription** : Inscription d'utilisateurs et suivi de présence (planifié)
 - **Gestion d'Erreurs** : Gestion d'erreurs complète avec réponses standardisées
+- **Filtrage d'Événements** : Paramètres de requête pour filtrer par type, lieu et plage de dates
+- **Mises à Jour d'Événements** : Mise à jour partielle via HTTP PATCH pour maintenir les informations à jour
 
 ## Stack Technique
 
@@ -40,6 +42,7 @@ Le service fournit actuellement :
 - `GET /events` - Récupérer la liste des événements
 - `POST /events` - Créer un nouvel événement
 - `GET /events/<event_id>` - Obtenir les détails d'un événement spécifique
+- `PATCH /events/<event_id>` - Mettre à jour partiellement un événement existant
 
 ## Modèle de Données d'Événement
 

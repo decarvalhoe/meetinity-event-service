@@ -13,6 +13,8 @@ The Event Service is built with **Python Flask** and provides comprehensive even
 - **Event Discovery**: Search and filtering capabilities for event browsing
 - **Registration System**: User registration and attendance tracking (planned)
 - **Error Handling**: Comprehensive error handling with standardized responses
+- **Event Filtering**: Query parameters for narrowing results by type, location, and date range
+- **Event Updates**: Partial updates via HTTP PATCH to keep event details current
 
 ## Tech Stack
 
@@ -40,6 +42,7 @@ The service currently provides:
 - `GET /events` - Retrieve list of events
 - `POST /events` - Create a new event
 - `GET /events/<event_id>` - Get specific event details
+- `PATCH /events/<event_id>` - Partially update an existing event
 
 ## Event Data Model
 
