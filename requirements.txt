@@ -1,5 +1,13 @@
 Flask==3.0.0
 Flask-CORS==4.0.0
+SQLAlchemy==2.0.21
+psycopg2-binary==2.9.9
+alembic==1.12.1
 pytest==7.4.0
 flake8==6.0.0
+<<<<<<< HEAD
 gunicorn==21.2.0
+=======
+APScheduler==3.10.4
+qrcode==7.4.2
+>>>>>>> 2d65fcfd9bbe0268b5198402f136f346d599e7ff
