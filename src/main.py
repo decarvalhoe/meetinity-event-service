@@ -90,13 +90,9 @@ def validate_event(data: dict):
 
     if "attendees" in data:
         att = data["attendees"]
-        if (
-            not isinstance(att, int)
-            or isinstance(att, bool)
-            or att < 0
-        ):
+        if isinstance(att, bool) or not isinstance(att, int) or att < 0:
             errors.setdefault("attendees", []).append(
-                "Doit être un entier non booléen >= 0."
+                "Doit être un entier >= 0 (valeur booléenne non autorisée)."
             )
 
     if "date" in data:

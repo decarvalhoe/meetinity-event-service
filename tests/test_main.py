@@ -84,5 +84,5 @@ def test_create_event_rejects_boolean_attendees(client):
     assert response.status_code == 422
     assert response.json["error"]["message"] == "Validation échouée."
     assert response.json["error"]["details"]["attendees"] == [
-        "Doit être un entier non booléen >= 0."
+        "Doit être un entier >= 0 (valeur booléenne non autorisée)."
     ]
