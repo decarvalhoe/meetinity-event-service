@@ -1,7 +1,7 @@
 """Routes for managing events and related workflows."""
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from src.routes.dependencies import get_event_service
 from src.routes.utils import error_response
@@ -10,6 +10,7 @@ from src.services.events import (
     EventNotFoundError,
     ValidationError,
 )
+from src.services.calendar import generate_ics_feed
 
 events_bp = Blueprint("events", __name__)
 
@@ -28,6 +29,65 @@ def list_events():
     except ValidationError as exc:
         return error_response(422, exc.message, exc.errors)
     return jsonify({"events": events})
+
+
+@events_bp.get("/events/calendar")
+def events_calendar():
+    service = get_event_service()
+    try:
+        events = service.list_events(
+            event_type=request.args.get("type"),
+            location=request.args.get("location"),
+            before=request.args.get("before"),
+            after=request.args.get("after"),
+            status=request.args.get("status"),
+        )
+    except ValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+
+    feed = generate_ics_feed(events, calendar_name=request.args.get("name", "Meetinity Events"))
+    response = Response(feed, mimetype="text/calendar")
+    response.headers["Content-Disposition"] = 'attachment; filename="events.ics"'
+    return response
+
+
+@events_bp.get("/events/map")
+def events_map():
+    service = get_event_service()
+    try:
+        events = service.list_events(
+            event_type=request.args.get("type"),
+            location=request.args.get("location"),
+            before=request.args.get("before"),
+            after=request.args.get("after"),
+            status=request.args.get("status"),
+        )
+    except ValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+
+    features = []
+    for event in events:
+        coordinates = _extract_geo_coordinates(event)
+        if not coordinates:
+            continue
+        properties = {
+            "id": event.get("id"),
+            "title": event.get("title"),
+            "date": event.get("date"),
+            "location": event.get("location"),
+            "categories": [category.get("name") for category in event.get("categories", [])],
+            "tags": [tag.get("name") for tag in event.get("tags", [])],
+            "share_url": (event.get("share") or {}).get("url"),
+        }
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [coordinates["lon"], coordinates["lat"]]},
+                "properties": properties,
+            }
+        )
+
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 @events_bp.post("/events")
@@ -91,6 +151,46 @@ def update_event(event_id: int):
         return error_response(422, exc.message, exc.errors)
 
     return jsonify({"message": "Event updated", "event": updated_event})
+
+
+@events_bp.post("/events/<int:event_id>/bookmark")
+def bookmark_event(event_id: int):
+    user_id = _resolve_user_identifier()
+    if not user_id:
+        return error_response(422, "user_id requis pour enregistrer un favori.")
+    service = get_event_service()
+    try:
+        result = service.bookmark_event(event_id, user_id)
+    except EventNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    except ValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    return jsonify({"bookmark": result}), 201
+
+
+@events_bp.delete("/events/<int:event_id>/bookmark")
+def remove_bookmark(event_id: int):
+    user_id = _resolve_user_identifier()
+    if not user_id:
+        return error_response(422, "user_id requis pour retirer un favori.")
+    service = get_event_service()
+    try:
+        result = service.remove_bookmark(event_id, user_id)
+    except EventNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    except ValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    return jsonify({"bookmark": result})
+
+
+@events_bp.get("/events/<int:event_id>/bookmark")
+def list_bookmarks(event_id: int):
+    service = get_event_service()
+    try:
+        bookmarks = service.list_bookmarks(event_id)
+    except EventNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"bookmarks": bookmarks, "total": len(bookmarks)})
 
 
 @events_bp.post("/events/from-template")
@@ -181,6 +281,39 @@ def delete_translation(event_id: int, locale: str):
     except ValidationError as exc:
         return error_response(422, exc.message, exc.errors)
     return ("", 204)
+
+
+def _extract_geo_coordinates(event):
+    settings = event.get("settings") if isinstance(event.get("settings"), dict) else None
+    candidates = []
+    if settings:
+        for key in ("coordinates", "geo", "location"):
+            value = settings.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+    lat = event.get("latitude")
+    lon = event.get("longitude")
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+        return {"lat": float(lat), "lon": float(lon)}
+    for candidate in candidates:
+        c_lat = candidate.get("lat")
+        c_lon = candidate.get("lon") or candidate.get("lng")
+        if isinstance(c_lat, (int, float)) and isinstance(c_lon, (int, float)):
+            return {"lat": float(c_lat), "lon": float(c_lon)}
+    return None
+
+
+def _resolve_user_identifier():
+    user_id = None
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            user_id = payload.get("user_id")
+    if not user_id:
+        user_id = request.args.get("user_id")
+    if isinstance(user_id, str):
+        return user_id.strip()
+    return None
 
 
 def _handle_workflow(event_id: int, action: str):
