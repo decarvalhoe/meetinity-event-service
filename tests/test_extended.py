@@ -148,3 +148,165 @@ def test_event_validation_errors(client, payload, field):
     resp = client.post("/events", json=payload)
     assert resp.status_code == 422
     assert field in resp.json["error"]["details"]
+
+
+def test_virtual_networking_feedback_and_partners_flow(client):
+    create_resp = client.post(
+        "/events",
+        json={
+            "title": "Hybrid Innovation Summit",
+            "date": "2026-09-10",
+            "format": "hybrid",
+            "streaming_url": "https://stream.example.com/hybrid",
+            "virtual_platform": "Meetinity Live",
+            "virtual_access_instructions": "Use the secure token provided",
+            "secure_access_token": "secret-token",
+            "rtmp_ingest_url": "rtmp://live.example.com/app",
+            "rtmp_stream_key": "hybrid-key",
+            "location": "Paris HQ",
+        },
+    )
+    assert create_resp.status_code == 201
+    event_id = create_resp.json["event_id"]
+    event_payload = create_resp.json["event"]
+    assert event_payload["format"] == "hybrid"
+    assert event_payload["streaming_url"] == "https://stream.example.com/hybrid"
+    assert event_payload["rtmp_stream_key"] == "hybrid-key"
+
+    profile_1 = {
+        "email": "alice@example.com",
+        "name": "Alice",
+        "company": "Innotech",
+        "interests": ["AI", "Data"],
+        "goals": ["Partnerships"],
+        "availability": ["day1-morning", "day2-afternoon"],
+    }
+    profile_2 = {
+        "email": "bob@example.com",
+        "name": "Bob",
+        "company": "CloudCorp",
+        "interests": ["AI", "Cloud"],
+        "goals": ["Networking", "Partnerships"],
+        "availability": ["day1-morning"],
+    }
+
+    resp_profile_1 = client.post(
+        f"/events/{event_id}/networking/profiles", json=profile_1
+    )
+    assert resp_profile_1.status_code == 201
+    resp_profile_2 = client.post(
+        f"/events/{event_id}/networking/profiles", json=profile_2
+    )
+    assert resp_profile_2.status_code == 201
+
+    suggestions_resp = client.post(
+        f"/events/{event_id}/networking/suggestions", json={"limit": 1}
+    )
+    assert suggestions_resp.status_code == 200
+    suggestions = suggestions_resp.json["suggestions"]
+    assert len(suggestions) == 2  # mutual suggestion
+    assert all(s["rationale"] for s in suggestions)
+
+    alice_suggestions = client.get(
+        f"/events/{event_id}/networking/suggestions", query_string={"email": "alice@example.com"}
+    )
+    assert alice_suggestions.status_code == 200
+    assert alice_suggestions.json["total"] == 1
+    assert alice_suggestions.json["suggestions"][0]["suggested_email"] == "bob@example.com"
+
+    feedback_1 = client.post(
+        f"/events/{event_id}/feedback",
+        json={
+            "email": "alice@example.com",
+            "name": "Alice",
+            "rating": 5,
+            "comment": "Excellent sessions",
+        },
+    )
+    assert feedback_1.status_code == 201
+
+    feedback_2 = client.post(
+        f"/events/{event_id}/feedback",
+        json={
+            "email": "bob@example.com",
+            "name": "Bob",
+            "rating": 3,
+            "comment": "Bon contenu",
+        },
+    )
+    assert feedback_2.status_code == 201
+
+    list_feedback = client.get(f"/events/{event_id}/feedback")
+    assert list_feedback.status_code == 200
+    assert list_feedback.json["summary"]["total"] == 2
+
+    moderate = client.patch(
+        f"/events/{event_id}/feedback/{feedback_1.json['feedback']['id']}",
+        json={"status": "approved", "moderator": "moderator"},
+    )
+    assert moderate.status_code == 200
+    assert moderate.json["feedback"]["status"] == "approved"
+
+    speakers_resp = client.post(
+        f"/events/{event_id}/speakers",
+        json={
+            "name": "Alice",
+            "role": "speaker",
+            "title": "CTO",
+            "company": "Innotech",
+            "topics": {"main": "AI"},
+        },
+    )
+    assert speakers_resp.status_code == 201
+    speaker_id = speakers_resp.json["speaker"]["id"]
+
+    organizer_resp = client.post(
+        f"/events/{event_id}/speakers",
+        json={
+            "name": "Claire",
+            "role": "organizer",
+            "company": "Meetinity",
+        },
+    )
+    assert organizer_resp.status_code == 201
+
+    speaker_update = client.patch(
+        f"/events/{event_id}/speakers/{speaker_id}",
+        json={"company": "Innotech Labs"},
+    )
+    assert speaker_update.status_code == 200
+    assert speaker_update.json["speaker"]["company"] == "Innotech Labs"
+
+    speakers_list = client.get(f"/events/{event_id}/speakers")
+    assert speakers_list.status_code == 200
+    assert speakers_list.json["total"] == 2
+
+    sponsor_resp = client.post(
+        f"/events/{event_id}/sponsors",
+        json={
+            "name": "CloudCorp",
+            "level": "Gold",
+            "website": "https://cloudcorp.example.com",
+        },
+    )
+    assert sponsor_resp.status_code == 201
+    sponsor_id = sponsor_resp.json["sponsor"]["id"]
+
+    sponsor_update = client.patch(
+        f"/events/{event_id}/sponsors/{sponsor_id}",
+        json={"description": "Premier partenaire"},
+    )
+    assert sponsor_update.status_code == 200
+    assert sponsor_update.json["sponsor"]["description"] == "Premier partenaire"
+
+    sponsors_list = client.get(f"/events/{event_id}/sponsors")
+    assert sponsors_list.status_code == 200
+    assert sponsors_list.json["total"] == 1
+
+    delete_sponsor = client.delete(
+        f"/events/{event_id}/sponsors/{sponsor_id}"
+    )
+    assert delete_sponsor.status_code == 204
+
+    final_sponsors = client.get(f"/events/{event_id}/sponsors")
+    assert final_sponsors.json["total"] == 0
