@@ -6,6 +6,7 @@ for professional networking events on the Meetinity platform.
 
 from flask import Flask, jsonify, request
 from datetime import datetime
+from itertools import count
 
 app = Flask(__name__)
 
@@ -34,17 +35,14 @@ _INITIAL_EVENTS = [
 
 def _reset_events_storage():
     """Reset the in-memory storage to its initial state."""
-    global _events_storage, _next_event_id
+    global _events_storage, _event_id_counter
     _events_storage = [event.copy() for event in _INITIAL_EVENTS]
-    _next_event_id = (
-        max(event["id"] for event in _events_storage) + 1
-        if _events_storage
-        else 1
-    )
+    highest_id = max((event["id"] for event in _events_storage), default=0)
+    _event_id_counter = count(start=highest_id + 1)
 
 
 _events_storage = []
-_next_event_id = 1
+_event_id_counter = count(start=1)
 _reset_events_storage()
 
 
@@ -173,14 +171,12 @@ def create_event():
     if not is_valid:
         return error_response(422, "Validation échouée.", errors)
 
-    global _next_event_id
-    
     provided_date = data.get("date")
     if isinstance(provided_date, str):
         provided_date = provided_date.strip()
 
     new_event = {
-        "id": _next_event_id,
+        "id": next(_event_id_counter),
         "title": data["title"].strip(),
         "date": provided_date
         or datetime.today().strftime("%Y-%m-%d"),
@@ -190,7 +186,6 @@ def create_event():
     }
 
     _events_storage.append(new_event)
-    _next_event_id += 1
 
     return (
         jsonify(

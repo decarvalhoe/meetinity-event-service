@@ -1,9 +1,16 @@
+from pathlib import Path
+import sys
+
 import pytest
-from src.main import app
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.main import app, _reset_events_storage
 
 
 @pytest.fixture
 def client():
+    _reset_events_storage()
     app.config['TESTING'] = True
     with app.test_client() as client:
         yield client
