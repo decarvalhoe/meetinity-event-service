@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest
+
+      - name: Detect Node manifests
+        id: node_manifests
+        run: |
+          node_manifests=$(git ls-files -- ':**/package.json' ':**/package-lock.json' ':**/npm-shrinkwrap.json' ':**/yarn.lock')
+          if [ -n "$node_manifests" ]; then
+            echo "has_package=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_package=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          npm_locks=$(git ls-files -- ':**/package-lock.json' ':**/npm-shrinkwrap.json')
+          if [ -n "$npm_locks" ]; then
+            echo "has_npm_lock=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_npm_lock=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          yarn_locks=$(git ls-files -- ':**/yarn.lock')
+          if [ -n "$yarn_locks" ]; then
+            echo "has_yarn_lock=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_yarn_lock=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.node_manifests.outputs.has_package == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Node.js dependencies
+        if: steps.node_manifests.outputs.has_npm_lock == 'true'
+        run: npm ci
