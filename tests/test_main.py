@@ -5,7 +5,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.main import app, _reset_events_storage
+from src.main import app, _reset_events_storage  # noqa: E402
 
 
 @pytest.fixture
@@ -28,6 +28,21 @@ def test_get_events(client):
     assert response.status_code == 200
     assert 'events' in response.json
     assert len(response.json['events']) >= 0
+
+
+def test_get_events_with_filters(client):
+    # Ensure filtering by type narrows the results
+    response = client.get('/events?type=networking')
+    assert response.status_code == 200
+    events = response.json['events']
+    assert all(event['type'] == 'networking' for event in events)
+
+    # Invalid filter values should trigger validation errors
+    invalid_filter = client.get('/events?after=2025/08/01')
+    assert invalid_filter.status_code == 422
+    error = invalid_filter.json['error']
+    assert error['message'] == 'Validation échouée.'
+    assert 'after' in error['details']
 
 
 def test_create_event(client):
@@ -82,6 +97,58 @@ def test_create_and_get_event(client):
     assert event['attendees'] == payload['attendees']
 
 
+def test_update_event(client):
+    payload = {
+        "title": "Evenement Update",
+        "date": "2025-09-15",
+        "location": "Nice",
+        "type": "conference",
+        "attendees": 50,
+    }
+
+    create_response = client.post('/events', json=payload)
+    event_id = create_response.json['event_id']
+
+    update_payload = {"location": "Nice Centre", "attendees": 75}
+    update_response = client.patch(f'/events/{event_id}', json=update_payload)
+    assert update_response.status_code == 200
+    updated_event = update_response.json['event']
+    assert updated_event['location'] == "Nice Centre"
+    assert updated_event['attendees'] == 75
+
+    # Fetch to confirm persistence
+    fetch_response = client.get(f'/events/{event_id}')
+    assert fetch_response.status_code == 200
+    assert fetch_response.json['event']['attendees'] == 75
+
+
+def test_update_event_validation_errors(client):
+    create_response = client.post(
+        '/events',
+        json={"title": "Validation Target"},
+    )
+    event_id = create_response.json['event_id']
+
+    invalid_update = client.patch(
+        f'/events/{event_id}',
+        json={"date": "2025/11/01", "attendees": True},
+    )
+
+    assert invalid_update.status_code == 422
+    error = invalid_update.json['error']
+    assert error['message'] == 'Validation échouée.'
+    assert 'date' in error['details']
+    assert 'attendees' in error['details']
+
+
+def test_update_event_not_found(client):
+    response = client.patch('/events/9999', json={"title": "Missing"})
+    assert response.status_code == 404
+    error = response.json['error']
+    assert error['code'] == 404
+    assert error['message'] == 'Événement introuvable.'
+
+
 def test_get_event_not_found(client):
     response = client.get('/events/9999')
     assert response.status_code == 404
@@ -102,7 +169,10 @@ def test_create_event_with_array_payload(client):
 
 
 def test_create_event_rejects_boolean_attendees(client):
-    response = client.post('/events', json={"title": "Bool Event", "attendees": True})
+    response = client.post(
+        '/events',
+        json={"title": "Bool Event", "attendees": True},
+    )
     assert response.status_code == 422
     assert response.json["error"]["message"] == "Validation échouée."
     assert response.json["error"]["details"]["attendees"] == [
