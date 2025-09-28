@@ -6,9 +6,9 @@ psycopg2-binary==2.9.9
 alembic==1.12.1
 pytest==7.4.0
 flake8==6.0.0
-<<<<<<< HEAD
 gunicorn==21.2.0
-=======
 APScheduler==3.10.4
 qrcode==7.4.2
->>>>>>> 2d65fcfd9bbe0268b5198402f136f346d599e7ff
+requests==2.31.0
+responses==0.23.1
+grpcio==1.58.0
