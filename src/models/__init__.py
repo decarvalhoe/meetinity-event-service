@@ -12,6 +12,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Table,
     Text,
@@ -91,9 +92,19 @@ class EventTemplate(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
     default_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer)
+    default_timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    default_locale: Mapped[str] = mapped_column(String(10), nullable=False, default="fr")
+    fallback_locale: Mapped[Optional[str]] = mapped_column(String(10))
+    default_capacity_limit: Mapped[Optional[int]] = mapped_column(Integer)
+    default_metadata: Mapped[Optional[dict]] = mapped_column(JSON)
 
     events: Mapped[List["Event"]] = relationship(
         "Event", back_populates="template", cascade="all, delete"
+    )
+    translations: Mapped[List["EventTemplateTranslation"]] = relationship(
+        "EventTemplateTranslation",
+        back_populates="template",
+        cascade="all, delete-orphan",
     )
 
 
@@ -113,6 +124,10 @@ class Event(TimestampMixin, Base):
     __tablename__ = "events"
     __table_args__ = (
         CheckConstraint("attendees >= 0", name="ck_events_attendees_non_negative"),
+        CheckConstraint(
+            "capacity_limit IS NULL OR capacity_limit >= attendees",
+            name="ck_events_capacity_above_attendees",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -126,6 +141,18 @@ class Event(TimestampMixin, Base):
     registration_deadline: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
     )
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    status: Mapped[str] = mapped_column(
+        Enum("draft", "pending", "approved", "rejected", name="event_status"),
+        nullable=False,
+        default="draft",
+    )
+    capacity_limit: Mapped[Optional[int]] = mapped_column(Integer)
+    recurrence_rule: Mapped[Optional[str]] = mapped_column(String(255))
+    default_locale: Mapped[str] = mapped_column(String(10), nullable=False, default="fr")
+    fallback_locale: Mapped[Optional[str]] = mapped_column(String(10))
+    organizer_email: Mapped[Optional[str]] = mapped_column(String(255))
+    settings: Mapped[Optional[dict]] = mapped_column(JSON)
     template_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("event_templates.id", ondelete="SET NULL")
     )
@@ -152,6 +179,12 @@ class Event(TimestampMixin, Base):
     )
     approvals: Mapped[List["EventApproval"]] = relationship(
         "EventApproval", back_populates="event", cascade="all, delete-orphan"
+    )
+    approval_logs: Mapped[List["EventApprovalLog"]] = relationship(
+        "EventApprovalLog", back_populates="event", cascade="all, delete-orphan"
+    )
+    notifications: Mapped[List["EventNotification"]] = relationship(
+        "EventNotification", back_populates="event", cascade="all, delete-orphan"
     )
     registrations: Mapped[List["Registration"]] = relationship(
         "Registration",
@@ -204,6 +237,58 @@ class EventApproval(TimestampMixin, Base):
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     event: Mapped[Event] = relationship("Event", back_populates="approvals")
+
+
+class EventApprovalLog(TimestampMixin, Base):
+    __tablename__ = "event_approval_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    previous_status: Mapped[Optional[str]] = mapped_column(String(20))
+    new_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor: Mapped[Optional[str]] = mapped_column(String(120))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    event: Mapped[Event] = relationship("Event", back_populates="approval_logs")
+
+
+class EventNotification(TimestampMixin, Base):
+    __tablename__ = "event_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False, default="email")
+
+    event: Mapped[Event] = relationship("Event", back_populates="notifications")
+
+
+class EventTemplateTranslation(TimestampMixin, Base):
+    __tablename__ = "event_template_translations"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id",
+            "locale",
+            name="uq_event_template_translation_locale",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("event_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    locale: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+
+    template: Mapped[EventTemplate] = relationship(
+        "EventTemplate", back_populates="translations"
+    )
 
 
 class Registration(TimestampMixin, Base):
@@ -296,10 +381,13 @@ class NoShowPenalty(TimestampMixin, Base):
 __all__ = [
     "Event",
     "EventApproval",
+    "EventApprovalLog",
     "EventCategory",
+    "EventNotification",
     "EventSeries",
     "EventTag",
     "EventTemplate",
+    "EventTemplateTranslation",
     "EventTranslation",
     "Registration",
     "WaitlistEntry",
