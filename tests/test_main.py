@@ -62,10 +62,14 @@ def test_get_event_not_found(client):
 
 
 def test_create_event_with_array_payload(client):
-    response = client.post('/events', json=[{"title": "Invalid"}])
+    response = client.post('/events', json=[])
     assert response.status_code == 400
-    assert response.json['error']['code'] == 400
-    assert 'objet JSON' in response.json['error']['message']
+    error = response.json['error']
+    assert error['code'] == 400
+    assert (
+        error['message']
+        == "Payload JSON invalide: un objet JSON (type dict) est requis."
+    )
 
 
 def test_create_event_rejects_boolean_attendees(client):

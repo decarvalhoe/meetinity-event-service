@@ -75,7 +75,14 @@ def validate_event(data: dict):
         tuple: (is_valid: bool, errors: dict)
     """
     if not isinstance(data, dict):
-        return False, {"_schema": ["Objet JSON requis pour l'évènement."]}
+        return False, {
+            "_schema": [
+                {
+                    "code": 400,
+                    "message": "Objet JSON requis pour l'évènement.",
+                }
+            ]
+        }
 
     errors = {}
 
@@ -159,7 +166,7 @@ def create_event():
     if not isinstance(data, dict):
         return error_response(
             400,
-            "Payload JSON invalide: un objet JSON est requis.",
+            "Payload JSON invalide: un objet JSON (type dict) est requis.",
         )
 
     is_valid, errors = validate_event(data)
