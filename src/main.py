@@ -101,17 +101,23 @@ def validate_event(data: dict):
 
     if "date" in data:
         date_value = data.get("date")
-        if not isinstance(date_value, str) or not date_value.strip():
+        if not isinstance(date_value, str):
             errors.setdefault("date", []).append(
                 "Doit être une chaîne au format YYYY-MM-DD."
             )
         else:
-            try:
-                datetime.strptime(date_value.strip(), "%Y-%m-%d")
-            except ValueError:
+            stripped_date = date_value.strip()
+            if not stripped_date:
                 errors.setdefault("date", []).append(
-                    "Format de date invalide, attendu YYYY-MM-DD."
+                    "Doit être une chaîne au format YYYY-MM-DD."
                 )
+            else:
+                try:
+                    datetime.strptime(stripped_date, "%Y-%m-%d")
+                except ValueError:
+                    errors.setdefault("date", []).append(
+                        "Format de date invalide, attendu YYYY-MM-DD."
+                    )
 
     return len(errors) == 0, errors
 

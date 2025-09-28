@@ -36,6 +36,28 @@ def test_create_event(client):
     assert 'event_id' in response.json
 
 
+def test_create_event_with_invalid_date(client):
+    response = client.post(
+        '/events',
+        json={"title": "Date Invalide", "date": "2025/09/01"},
+    )
+    assert response.status_code == 422
+    error = response.json["error"]
+    assert error["message"] == "Validation échouée."
+    assert "date" in error["details"]
+    assert any(
+        "YYYY-MM-DD" in message for message in error["details"]["date"]
+    )
+
+
+def test_create_event_with_valid_date(client):
+    payload = {"title": "Date Valide", "date": "2025-10-05"}
+    response = client.post('/events', json=payload)
+    assert response.status_code == 201
+    created_event = response.json["event"]
+    assert created_event["date"] == payload["date"]
+
+
 def test_create_and_get_event(client):
     payload = {
         "title": "Evenement Test",
