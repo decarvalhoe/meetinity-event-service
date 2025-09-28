@@ -1,109 +1,107 @@
 # Meetinity Event Service
 
-This repository contains the event management service for the Meetinity platform, handling professional events, registrations, and event-related operations.
+This service powers professional event management on the Meetinity platform. It is built with **Flask** and **SQLAlchemy**, and exposes a JSON REST API for creating, searching and updating events.
 
 ## Overview
 
-The Event Service is built with **Python Flask** and provides comprehensive event management capabilities for the Meetinity platform. It handles event creation, management, user registrations, and event discovery features.
+- **Frameworks**: Flask 3, SQLAlchemy 2, Alembic
+- **Database**: PostgreSQL by default (SQLite fallback for local development/testing)
+- **Structure**: layered architecture with database, repository and service modules
 
 ## Features
 
-- **Event Management**: Complete CRUD operations for professional events
-- **Data Validation**: Robust input validation with detailed error messages
-- **Event Discovery**: Search and filtering capabilities for event browsing
-- **Registration System**: User registration and attendance tracking (planned)
-- **Error Handling**: Comprehensive error handling with standardized responses
-- **Event Filtering**: Query parameters for narrowing results by type, location, and date range
-- **Event Updates**: Partial updates via HTTP PATCH to keep event details current
+- Persistent storage of events, categories, tags, templates and series
+- CRUD operations exposed through REST endpoints
+- Validation with rich error messages and consistent HTTP responses
+- Automatic timestamps and status tracking for approvals
+- Service layer encapsulating business logic, including series management
 
-## Tech Stack
+## Project Layout
 
-- **Flask**: Lightweight Python web framework
-- **Python**: Core business logic and data processing
-
-## Project Status
-
-- **Progress**: 35%
-- **Completed Features**: Basic CRUD API, data validation, error handling, health monitoring
-- **Pending Features**: Database integration, user registration system, event categories, search functionality
-
-## Current Implementation
-
-The service currently provides:
-
-- **Mock Event Data**: Sample professional events with realistic information
-- **Validation Logic**: Input validation for event creation and updates
-- **Error Responses**: Standardized error handling with detailed messages
-- **Health Monitoring**: Service health check endpoint
-
-## API Endpoints
-
-- `GET /health` - Service health check
-- `GET /events` - Retrieve list of events
-- `POST /events` - Create a new event
-- `GET /events/<event_id>` - Get specific event details
-- `PATCH /events/<event_id>` - Partially update an existing event
-
-## Event Data Model
-
-Events include the following information:
-- **Basic Info**: Title, description, date, location
-- **Event Type**: Category/type of professional event
-- **Attendance**: Number of registered attendees
-- **Metadata**: Creation and update timestamps
+```
+src/
+├── database/             # SQLAlchemy engine and session management
+├── main.py               # Flask application and HTTP endpoints
+├── models/               # SQLAlchemy ORM models
+├── repositories/         # Data access abstractions
+└── services/             # Domain services (validation + orchestration)
+migrations/               # Alembic migration scripts
+tests/                    # Pytest suite with database fixtures
+```
 
 ## Getting Started
 
-1. Install dependencies:
+1. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-2. Run the service:
+2. **Configure the database**
+   Set a `DATABASE_URL` pointing to PostgreSQL or SQLite. Example for SQLite:
+   ```bash
+   export DATABASE_URL=sqlite:///./event_service.db
+   ```
+   PostgreSQL example:
+   ```bash
+   export DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/meetinity_events
+   ```
+
+3. **Run migrations**
+   ```bash
+   alembic upgrade head
+   ```
+
+4. **Start the service**
    ```bash
    python src/main.py
    ```
+   The API listens on `http://localhost:5003` by default.
 
-The service will start on port 5003 by default.
+## Database Migrations
 
-## Development Roadmap
+Alembic is configured under the `migrations/` directory.
 
-### Phase 1 (Current)
-- Basic CRUD operations with mock data
-- Input validation and error handling
-- Health monitoring
+- Create a new revision:
+  ```bash
+  alembic revision -m "short description"
+  ```
+- Apply migrations:
+  ```bash
+  alembic upgrade head
+  ```
+- Downgrade to a previous revision:
+  ```bash
+  alembic downgrade <revision_id>
+  ```
 
-### Phase 2 (Next)
-- Database integration for persistent storage
-- User registration and attendance tracking
-- Event search and filtering
-
-### Phase 3 (Future)
-- Event recommendations based on user interests
-- Calendar integration
-- Event analytics and reporting
-
-## Architecture
-
-```
-src/
-├── main.py              # Application entry point with routes
-├── models/              # Data models (to be implemented)
-├── services/            # Business logic (to be implemented)
-└── utils/               # Utility functions (to be implemented)
-```
-
-## Validation Rules
-
-Event validation includes:
-- **Title**: Required, non-empty string
-- **Attendees**: Optional integer >= 0
-- **Date**: Valid date format
-- **Location**: Optional string
+The migration environment automatically uses the `DATABASE_URL` environment variable. When not provided, it falls back to the same defaults as the application (`sqlite:///./event_service.db`).
 
 ## Testing
 
+Pytest is configured to run against a temporary SQLite database with fixtures defined in `tests/conftest.py`.
+
 ```bash
 pytest
-flake8 src tests
 ```
+
+## Environment Variables
+
+| Variable       | Description                                                      |
+|----------------|------------------------------------------------------------------|
+| `DATABASE_URL` | Full SQLAlchemy URL (e.g. `postgresql+psycopg2://...`). Optional. |
+| `DB_USER`      | PostgreSQL user (used when `DATABASE_URL` is not provided).       |
+| `DB_PASSWORD`  | PostgreSQL password.                                              |
+| `DB_HOST`      | PostgreSQL host.                                                  |
+| `DB_PORT`      | PostgreSQL port.                                                  |
+| `DB_NAME`      | PostgreSQL database name.                                         |
+| `DB_POOL_SIZE` | Optional pool size override (default: 5).                         |
+| `DB_MAX_OVERFLOW` | Optional pool overflow override (default: 10).                 |
+
+If `DATABASE_URL` is omitted, the application will assemble one from the `DB_*` variables. When none are set it uses a local SQLite database for convenience.
+
+## Development Tips
+
+- Use Alembic for all schema changes.
+- Keep business rules in the service layer (`src/services/`).
+- Repositories should stay focused on data access and querying.
+- Tests rely on the fixtures in `tests/conftest.py` to prepare a clean database per test.
