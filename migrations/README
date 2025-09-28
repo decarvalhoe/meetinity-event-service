@@ -1,0 +1,3 @@
+This directory contains Alembic migration scripts for the Meetinity Event Service.
+
+Use ``alembic revision`` to create new schema changes and ``alembic upgrade`` to apply them.
