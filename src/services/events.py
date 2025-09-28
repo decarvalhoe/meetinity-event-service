@@ -182,6 +182,13 @@ class EventService:
             attendees=clean_payload.get("attendees", 0),
             timezone=clean_payload.get("timezone", "UTC"),
             status=clean_payload.get("status", "draft"),
+            event_format=clean_payload.get("event_format", "in_person"),
+            streaming_url=clean_payload.get("streaming_url"),
+            virtual_platform=clean_payload.get("virtual_platform"),
+            virtual_access_instructions=clean_payload.get("virtual_access_instructions"),
+            secure_access_token=clean_payload.get("secure_access_token"),
+            rtmp_ingest_url=clean_payload.get("rtmp_ingest_url"),
+            rtmp_stream_key=clean_payload.get("rtmp_stream_key"),
             capacity_limit=clean_payload.get("capacity_limit"),
             recurrence_rule=clean_payload.get("recurrence_rule"),
             default_locale=clean_payload.get("default_locale", "fr"),
@@ -239,6 +246,13 @@ class EventService:
             "event_date",
             "timezone",
             "status",
+            "event_format",
+            "streaming_url",
+            "virtual_platform",
+            "virtual_access_instructions",
+            "secure_access_token",
+            "rtmp_ingest_url",
+            "rtmp_stream_key",
             "capacity_limit",
             "recurrence_rule",
             "default_locale",
@@ -511,6 +525,71 @@ class EventService:
             else:
                 clean["status"] = status
 
+        if "format" in data or require_title:
+            event_format = data.get("format", "in_person")
+            if event_format not in {"in_person", "virtual", "hybrid"}:
+                errors.setdefault("format", []).append("Format d'événement invalide.")
+            else:
+                clean["event_format"] = event_format
+
+        if "streaming_url" in data:
+            streaming_url = data.get("streaming_url")
+            if streaming_url is None:
+                clean["streaming_url"] = None
+            elif not isinstance(streaming_url, str) or not streaming_url.strip():
+                errors.setdefault("streaming_url", []).append("URL de streaming invalide.")
+            else:
+                clean["streaming_url"] = streaming_url.strip()
+
+        if "virtual_platform" in data:
+            platform = data.get("virtual_platform")
+            if platform is None:
+                clean["virtual_platform"] = None
+            elif not isinstance(platform, str) or not platform.strip():
+                errors.setdefault("virtual_platform", []).append("Plateforme virtuelle invalide.")
+            else:
+                clean["virtual_platform"] = platform.strip()
+
+        if "virtual_access_instructions" in data:
+            instructions = data.get("virtual_access_instructions")
+            if instructions is None:
+                clean["virtual_access_instructions"] = None
+            elif not isinstance(instructions, str) or not instructions.strip():
+                errors.setdefault("virtual_access_instructions", []).append(
+                    "Instructions d'accès invalides."
+                )
+            else:
+                clean["virtual_access_instructions"] = instructions.strip()
+
+        if "secure_access_token" in data:
+            token = data.get("secure_access_token")
+            if token is None:
+                clean["secure_access_token"] = None
+            elif not isinstance(token, str) or not token.strip():
+                errors.setdefault("secure_access_token", []).append(
+                    "Jeton d'accès sécurisé invalide."
+                )
+            else:
+                clean["secure_access_token"] = token.strip()
+
+        if "rtmp_ingest_url" in data:
+            ingest_url = data.get("rtmp_ingest_url")
+            if ingest_url is None:
+                clean["rtmp_ingest_url"] = None
+            elif not isinstance(ingest_url, str) or not ingest_url.strip():
+                errors.setdefault("rtmp_ingest_url", []).append("URL RTMP invalide.")
+            else:
+                clean["rtmp_ingest_url"] = ingest_url.strip()
+
+        if "rtmp_stream_key" in data:
+            stream_key = data.get("rtmp_stream_key")
+            if stream_key is None:
+                clean["rtmp_stream_key"] = None
+            elif not isinstance(stream_key, str) or not stream_key.strip():
+                errors.setdefault("rtmp_stream_key", []).append("Clé RTMP invalide.")
+            else:
+                clean["rtmp_stream_key"] = stream_key.strip()
+
         if "capacity_limit" in data:
             capacity = data.get("capacity_limit")
             if capacity is None:
@@ -758,6 +837,13 @@ class EventService:
             "attendees": payload.get("attendees", 0),
             "timezone": payload.get("timezone") or template.default_timezone,
             "status": payload.get("status", "draft"),
+            "format": payload.get("format") or "in_person",
+            "streaming_url": payload.get("streaming_url"),
+            "virtual_platform": payload.get("virtual_platform"),
+            "virtual_access_instructions": payload.get("virtual_access_instructions"),
+            "secure_access_token": payload.get("secure_access_token"),
+            "rtmp_ingest_url": payload.get("rtmp_ingest_url"),
+            "rtmp_stream_key": payload.get("rtmp_stream_key"),
             "capacity_limit": payload.get("capacity_limit", template.default_capacity_limit),
             "recurrence_rule": payload.get("recurrence_rule"),
             "default_locale": payload.get("default_locale", template.default_locale),
@@ -854,6 +940,13 @@ class EventService:
             "attendees": event.attendees,
             "timezone": event.timezone,
             "status": event.status,
+            "format": event.event_format,
+            "streaming_url": event.streaming_url,
+            "virtual_platform": event.virtual_platform,
+            "virtual_access_instructions": event.virtual_access_instructions,
+            "secure_access_token": event.secure_access_token,
+            "rtmp_ingest_url": event.rtmp_ingest_url,
+            "rtmp_stream_key": event.rtmp_stream_key,
             "capacity_limit": event.capacity_limit,
             "recurrence_rule": event.recurrence_rule,
             "default_locale": event.default_locale,

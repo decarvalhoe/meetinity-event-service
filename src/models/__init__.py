@@ -10,6 +10,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -147,6 +148,17 @@ class Event(TimestampMixin, Base):
         nullable=False,
         default="draft",
     )
+    event_format: Mapped[str] = mapped_column(
+        Enum("in_person", "virtual", "hybrid", name="event_format"),
+        nullable=False,
+        default="in_person",
+    )
+    streaming_url: Mapped[Optional[str]] = mapped_column(String(500))
+    virtual_platform: Mapped[Optional[str]] = mapped_column(String(255))
+    virtual_access_instructions: Mapped[Optional[str]] = mapped_column(Text)
+    secure_access_token: Mapped[Optional[str]] = mapped_column(String(255))
+    rtmp_ingest_url: Mapped[Optional[str]] = mapped_column(String(500))
+    rtmp_stream_key: Mapped[Optional[str]] = mapped_column(String(255))
     capacity_limit: Mapped[Optional[int]] = mapped_column(Integer)
     recurrence_rule: Mapped[Optional[str]] = mapped_column(String(255))
     default_locale: Mapped[str] = mapped_column(String(10), nullable=False, default="fr")
@@ -197,6 +209,35 @@ class Event(TimestampMixin, Base):
         back_populates="event",
         cascade="all, delete-orphan",
         order_by="WaitlistEntry.created_at",
+    )
+    participant_profiles: Mapped[List["ParticipantProfile"]] = relationship(
+        "ParticipantProfile",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="ParticipantProfile.attendee_name",
+    )
+    networking_suggestions: Mapped[List["NetworkingSuggestion"]] = relationship(
+        "NetworkingSuggestion",
+        back_populates="event",
+        cascade="all, delete-orphan",
+    )
+    feedback_entries: Mapped[List["EventFeedback"]] = relationship(
+        "EventFeedback",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="EventFeedback.created_at.desc()",
+    )
+    speaker_profiles: Mapped[List["EventSpeaker"]] = relationship(
+        "EventSpeaker",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="EventSpeaker.display_order",
+    )
+    sponsors: Mapped[List["EventSponsor"]] = relationship(
+        "EventSponsor",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="EventSponsor.display_order",
     )
     penalties: Mapped[List["NoShowPenalty"]] = relationship(
         "NoShowPenalty", back_populates="event", cascade="all, delete-orphan"
@@ -378,6 +419,154 @@ class NoShowPenalty(TimestampMixin, Base):
     event: Mapped[Event] = relationship("Event", back_populates="penalties")
 
 
+class ParticipantProfile(TimestampMixin, Base):
+    __tablename__ = "participant_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "attendee_email",
+            name="uq_participant_profiles_event_email",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    attendee_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    attendee_name: Mapped[Optional[str]] = mapped_column(String(255))
+    company: Mapped[Optional[str]] = mapped_column(String(255))
+    bio: Mapped[Optional[str]] = mapped_column(Text)
+    headline: Mapped[Optional[str]] = mapped_column(String(255))
+    interests: Mapped[Optional[dict]] = mapped_column(JSON)
+    goals: Mapped[Optional[dict]] = mapped_column(JSON)
+    availability: Mapped[Optional[dict]] = mapped_column(JSON)
+    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    event: Mapped[Event] = relationship("Event", back_populates="participant_profiles")
+    sent_suggestions: Mapped[List["NetworkingSuggestion"]] = relationship(
+        "NetworkingSuggestion",
+        foreign_keys="NetworkingSuggestion.participant_id",
+        back_populates="participant",
+        cascade="all, delete-orphan",
+    )
+    received_suggestions: Mapped[List["NetworkingSuggestion"]] = relationship(
+        "NetworkingSuggestion",
+        foreign_keys="NetworkingSuggestion.suggested_participant_id",
+        back_populates="suggested_participant",
+    )
+
+
+class NetworkingSuggestion(TimestampMixin, Base):
+    __tablename__ = "networking_suggestions"
+    __table_args__ = (
+        UniqueConstraint(
+            "participant_id",
+            "suggested_participant_id",
+            name="uq_networking_suggestions_pair",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    participant_id: Mapped[int] = mapped_column(
+        ForeignKey("participant_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    suggested_participant_id: Mapped[int] = mapped_column(
+        ForeignKey("participant_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rationale: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Enum("pending", "accepted", "dismissed", name="networking_status"),
+        nullable=False,
+        default="pending",
+    )
+    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    event: Mapped[Event] = relationship("Event", back_populates="networking_suggestions")
+    participant: Mapped[ParticipantProfile] = relationship(
+        "ParticipantProfile",
+        foreign_keys=[participant_id],
+        back_populates="sent_suggestions",
+    )
+    suggested_participant: Mapped[ParticipantProfile] = relationship(
+        "ParticipantProfile",
+        foreign_keys=[suggested_participant_id],
+        back_populates="received_suggestions",
+    )
+
+
+class EventFeedback(TimestampMixin, Base):
+    __tablename__ = "event_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    participant_email: Mapped[Optional[str]] = mapped_column(String(255))
+    participant_name: Mapped[Optional[str]] = mapped_column(String(255))
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    comment: Mapped[Optional[str]] = mapped_column(Text)
+    sentiment: Mapped[Optional[str]] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(
+        Enum("pending", "approved", "rejected", name="feedback_status"),
+        nullable=False,
+        default="pending",
+    )
+    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    moderated_by: Mapped[Optional[str]] = mapped_column(String(120))
+    moderated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    event: Mapped[Event] = relationship("Event", back_populates="feedback_entries")
+
+
+class EventSpeaker(TimestampMixin, Base):
+    __tablename__ = "event_speakers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        Enum("speaker", "organizer", name="event_speaker_role"),
+        nullable=False,
+        default="speaker",
+    )
+    title: Mapped[Optional[str]] = mapped_column(String(255))
+    company: Mapped[Optional[str]] = mapped_column(String(255))
+    bio: Mapped[Optional[str]] = mapped_column(Text)
+    topics: Mapped[Optional[dict]] = mapped_column(JSON)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255))
+    photo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    event: Mapped[Event] = relationship("Event", back_populates="speaker_profiles")
+
+
+class EventSponsor(TimestampMixin, Base):
+    __tablename__ = "event_sponsors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    level: Mapped[Optional[str]] = mapped_column(String(120))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    website: Mapped[Optional[str]] = mapped_column(String(500))
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500))
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255))
+    metadata: Mapped[Optional[dict]] = mapped_column(JSON)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    event: Mapped[Event] = relationship("Event", back_populates="sponsors")
+
+
 __all__ = [
     "Event",
     "EventApproval",
@@ -393,4 +582,9 @@ __all__ = [
     "WaitlistEntry",
     "AttendanceRecord",
     "NoShowPenalty",
+    "ParticipantProfile",
+    "NetworkingSuggestion",
+    "EventFeedback",
+    "EventSpeaker",
+    "EventSponsor",
 ]

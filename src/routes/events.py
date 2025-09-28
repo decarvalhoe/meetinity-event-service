@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from flask import Blueprint, Response, jsonify, request
 
-from src.routes.dependencies import get_event_service
+from src.routes.dependencies import (
+    get_event_service,
+    get_feedback_service,
+    get_networking_service,
+    get_speaker_service,
+    get_sponsor_service,
+)
 from src.routes.utils import error_response
 from src.services.events import (
     ApprovalWorkflowError,
@@ -11,6 +17,14 @@ from src.services.events import (
     ValidationError,
 )
 from src.services.calendar import generate_ics_feed
+from src.services.feedback import FeedbackNotFoundError, FeedbackValidationError
+from src.services.networking import NetworkingValidationError, ProfileNotFoundError
+from src.services.participants import (
+    SpeakerNotFoundError,
+    SpeakerValidationError,
+    SponsorNotFoundError,
+    SponsorValidationError,
+)
 
 events_bp = Blueprint("events", __name__)
 
@@ -358,3 +372,225 @@ def approve_event(event_id: int):
 @events_bp.post("/events/<int:event_id>/reject")
 def reject_event(event_id: int):
     return _handle_workflow(event_id, "reject")
+
+
+@events_bp.post("/events/<int:event_id>/networking/profiles")
+def register_networking_profile(event_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_networking_service()
+    try:
+        profile = service.register_profile(event_id, payload)
+    except NetworkingValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except ProfileNotFoundError:
+        return error_response(404, "Événement ou profil introuvable.")
+    return jsonify({"profile": profile}), 201
+
+
+@events_bp.get("/events/<int:event_id>/networking/profiles")
+def list_networking_profiles(event_id: int):
+    service = get_networking_service()
+    try:
+        profiles = service.list_profiles(event_id)
+    except ProfileNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"profiles": profiles, "total": len(profiles)})
+
+
+@events_bp.post("/events/<int:event_id>/networking/suggestions")
+def generate_networking_suggestions(event_id: int):
+    payload = {}
+    if request.data:
+        if not request.is_json:
+            return error_response(415, "Content-Type 'application/json' requis.")
+        payload = request.get_json(silent=True) or {}
+
+    email = payload.get("email") or payload.get("participant_email")
+    limit = payload.get("limit")
+    service = get_networking_service()
+    try:
+        suggestions = service.generate_suggestions(
+            event_id,
+            participant_email=email,
+            limit=limit if isinstance(limit, int) else 3,
+        )
+    except NetworkingValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except ProfileNotFoundError:
+        return error_response(404, "Événement ou profil introuvable.")
+    return jsonify({"suggestions": suggestions})
+
+
+@events_bp.get("/events/<int:event_id>/networking/suggestions")
+def list_networking_suggestions(event_id: int):
+    email = request.args.get("email")
+    service = get_networking_service()
+    try:
+        suggestions = service.list_suggestions(event_id, participant_email=email)
+    except ProfileNotFoundError:
+        return error_response(404, "Événement ou profil introuvable.")
+    return jsonify({"suggestions": suggestions, "total": len(suggestions)})
+
+
+@events_bp.post("/events/<int:event_id>/feedback")
+def submit_feedback(event_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_feedback_service()
+    try:
+        feedback = service.submit_feedback(event_id, payload)
+    except FeedbackValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except FeedbackNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"feedback": feedback}), 201
+
+
+@events_bp.get("/events/<int:event_id>/feedback")
+def list_feedback(event_id: int):
+    service = get_feedback_service()
+    try:
+        payload = service.list_feedback(event_id)
+    except FeedbackNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify(payload)
+
+
+@events_bp.patch("/events/<int:event_id>/feedback/<int:feedback_id>")
+def moderate_feedback(event_id: int, feedback_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_feedback_service()
+    try:
+        feedback = service.moderate_feedback(event_id, feedback_id, payload)
+    except FeedbackValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except FeedbackNotFoundError:
+        return error_response(404, "Feedback introuvable.")
+    return jsonify({"feedback": feedback})
+
+
+@events_bp.get("/events/<int:event_id>/speakers")
+def list_speakers(event_id: int):
+    role = request.args.get("role")
+    service = get_speaker_service()
+    try:
+        speakers = service.list_profiles(event_id, role=role)
+    except SpeakerNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"speakers": speakers, "total": len(speakers)})
+
+
+@events_bp.post("/events/<int:event_id>/speakers")
+def add_speaker(event_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_speaker_service()
+    try:
+        speaker = service.add_profile(event_id, payload)
+    except SpeakerValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except SpeakerNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"speaker": speaker}), 201
+
+
+@events_bp.patch("/events/<int:event_id>/speakers/<int:speaker_id>")
+def update_speaker(event_id: int, speaker_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_speaker_service()
+    try:
+        speaker = service.update_profile(event_id, speaker_id, payload)
+    except SpeakerValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except SpeakerNotFoundError:
+        return error_response(404, "Intervenant introuvable.")
+    return jsonify({"speaker": speaker})
+
+
+@events_bp.delete("/events/<int:event_id>/speakers/<int:speaker_id>")
+def delete_speaker(event_id: int, speaker_id: int):
+    service = get_speaker_service()
+    try:
+        service.remove_profile(event_id, speaker_id)
+    except SpeakerNotFoundError:
+        return error_response(404, "Intervenant introuvable.")
+    return "", 204
+
+
+@events_bp.get("/events/<int:event_id>/sponsors")
+def list_sponsors(event_id: int):
+    service = get_sponsor_service()
+    try:
+        sponsors = service.list_sponsors(event_id)
+    except SponsorNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"sponsors": sponsors, "total": len(sponsors)})
+
+
+@events_bp.post("/events/<int:event_id>/sponsors")
+def add_sponsor(event_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_sponsor_service()
+    try:
+        sponsor = service.add_sponsor(event_id, payload)
+    except SponsorValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except SponsorNotFoundError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"sponsor": sponsor}), 201
+
+
+@events_bp.patch("/events/<int:event_id>/sponsors/<int:sponsor_id>")
+def update_sponsor(event_id: int, sponsor_id: int):
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response(400, "JSON invalide ou non parsable.")
+
+    service = get_sponsor_service()
+    try:
+        sponsor = service.update_sponsor(event_id, sponsor_id, payload)
+    except SponsorValidationError as exc:
+        return error_response(422, exc.message, exc.errors)
+    except SponsorNotFoundError:
+        return error_response(404, "Sponsor introuvable.")
+    return jsonify({"sponsor": sponsor})
+
+
+@events_bp.delete("/events/<int:event_id>/sponsors/<int:sponsor_id>")
+def delete_sponsor(event_id: int, sponsor_id: int):
+    service = get_sponsor_service()
+    try:
+        service.remove_sponsor(event_id, sponsor_id)
+    except SponsorNotFoundError:
+        return error_response(404, "Sponsor introuvable.")
+    return "", 204

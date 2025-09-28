@@ -14,9 +14,13 @@ from src.models import (
     EventCategory,
     EventNotification,
     EventSeries,
+    EventSpeaker,
+    EventSponsor,
     EventTag,
     EventTemplate,
     EventTranslation,
+    NetworkingSuggestion,
+    ParticipantProfile,
 )
 
 
@@ -42,6 +46,12 @@ class EventRepository:
                 selectinload(Event.categories),
                 selectinload(Event.tags),
                 selectinload(Event.translations),
+                selectinload(Event.participant_profiles),
+                selectinload(Event.networking_suggestions)
+                .joinedload(NetworkingSuggestion.suggested_participant),
+                selectinload(Event.feedback_entries),
+                selectinload(Event.speaker_profiles),
+                selectinload(Event.sponsors),
             )
             .order_by(Event.event_date.asc(), Event.id.asc())
         )
@@ -67,6 +77,12 @@ class EventRepository:
                 selectinload(Event.categories),
                 selectinload(Event.tags),
                 selectinload(Event.translations),
+                selectinload(Event.participant_profiles),
+                selectinload(Event.networking_suggestions)
+                .joinedload(NetworkingSuggestion.suggested_participant),
+                selectinload(Event.feedback_entries),
+                selectinload(Event.speaker_profiles),
+                selectinload(Event.sponsors),
             )
             .where(Event.id == event_id)
         )
@@ -85,6 +101,13 @@ class EventRepository:
         attendees: int,
         timezone: str,
         status: str,
+        event_format: str,
+        streaming_url: Optional[str],
+        virtual_platform: Optional[str],
+        virtual_access_instructions: Optional[str],
+        secure_access_token: Optional[str],
+        rtmp_ingest_url: Optional[str],
+        rtmp_stream_key: Optional[str],
         capacity_limit: Optional[int],
         recurrence_rule: Optional[str],
         default_locale: str,
@@ -104,6 +127,13 @@ class EventRepository:
             attendees=attendees,
             timezone=timezone,
             status=status,
+            event_format=event_format,
+            streaming_url=streaming_url,
+            virtual_platform=virtual_platform,
+            virtual_access_instructions=virtual_access_instructions,
+            secure_access_token=secure_access_token,
+            rtmp_ingest_url=rtmp_ingest_url,
+            rtmp_stream_key=rtmp_stream_key,
             capacity_limit=capacity_limit,
             recurrence_rule=recurrence_rule,
             default_locale=default_locale,
