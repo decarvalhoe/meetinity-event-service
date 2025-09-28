@@ -15,6 +15,8 @@ from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from src.database import get_session
+from src.integrations.base import IntegrationError
+from src.integrations.payment_service import PaymentServiceClient
 from src.models import (
     AttendanceRecord,
     Event,
@@ -31,6 +33,7 @@ __all__ = [
     "DuplicateRegistrationError",
     "PenaltyActiveError",
     "CheckInError",
+    "PaymentProcessingError",
 ]
 
 
@@ -54,11 +57,21 @@ class CheckInError(RegistrationError):
     """Raised when a check-in request cannot be honoured."""
 
 
+class PaymentProcessingError(RegistrationError):
+    """Raised when an interaction with the payment service fails."""
+
+
 class RegistrationService:
     """High level operations for managing registrations and attendance."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        payment_client: Optional[PaymentServiceClient] = None,
+    ) -> None:
         self.session = session
+        self.payment_client = payment_client or PaymentServiceClient()
 
     # ------------------------------------------------------------------
     # Public API
@@ -94,7 +107,7 @@ class RegistrationService:
 
         self._ensure_not_already_registered(event_id, clean_email)
 
-        metadata_payload = json.dumps(metadata or {}, sort_keys=True)
+        metadata_payload = dict(metadata or {})
 
         confirmed_count = self._count_confirmed_registrations(event_id)
         capacity = event.attendees if event.attendees is not None else 0
@@ -104,8 +117,20 @@ class RegistrationService:
                 event,
                 email=clean_email,
                 full_name=full_name,
-                metadata=metadata_payload,
+                metadata=json.dumps(metadata_payload, sort_keys=True),
             )
+            pricing = self._extract_pricing(event)
+            if pricing:
+                payment_metadata = self._capture_payment(
+                    event,
+                    registration,
+                    pricing,
+                    attendee_email=clean_email,
+                    metadata=metadata_payload,
+                )
+                metadata_payload["payment"] = payment_metadata
+                registration.metadata = json.dumps(metadata_payload, sort_keys=True)
+                self.session.flush()
             self.session.commit()
             return {
                 "status": "confirmed",
@@ -128,8 +153,19 @@ class RegistrationService:
         if registration.status in {"cancelled", "no_show"}:
             return {"status": registration.status}
 
+        metadata_payload = self._metadata_as_dict(registration.metadata)
+        payment_info = metadata_payload.get("payment")
+
         registration.status = "cancelled"
         self.session.flush()
+        if payment_info and payment_info.get("status") == "captured":
+            updated_payment = self._refund_payment(
+                registration.event,
+                payment_info,
+            )
+            metadata_payload["payment"] = updated_payment
+            registration.metadata = json.dumps(metadata_payload, sort_keys=True)
+            self.session.flush()
         promoted = self._promote_waitlist_if_possible(registration.event)
         self.session.commit()
         payload: Dict[str, Any] = {"status": "cancelled"}
@@ -325,6 +361,102 @@ class RegistrationService:
         self.session.refresh(entry)
         return entry
 
+    @staticmethod
+    def _metadata_as_dict(metadata: Optional[str]) -> Dict[str, Any]:
+        if not metadata:
+            return {}
+        try:
+            payload = json.loads(metadata)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _extract_pricing(event: Event) -> Optional[Dict[str, Any]]:
+        settings = event.settings if isinstance(event.settings, dict) else {}
+        pricing = settings.get("pricing") if isinstance(settings, dict) else None
+        if not isinstance(pricing, dict):
+            return None
+        amount = pricing.get("amount")
+        currency = pricing.get("currency", "EUR")
+        try:
+            amount_value = float(amount)
+        except (TypeError, ValueError):
+            return None
+        if amount_value <= 0:
+            return None
+        currency_value = str(currency or "EUR").upper()
+        return {"amount": amount_value, "currency": currency_value}
+
+    def _capture_payment(
+        self,
+        event: Event,
+        registration: Registration,
+        pricing: Dict[str, Any],
+        *,
+        attendee_email: str,
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self.payment_client is None:  # pragma: no cover - guardrail
+            raise PaymentProcessingError("Service de paiement indisponible.")
+        enriched_metadata = dict(metadata)
+        enriched_metadata.update(
+            {
+                "registration_id": registration.id,
+                "event_title": event.title,
+            }
+        )
+        try:
+            response = self.payment_client.capture_payment(
+                event_id=event.id,
+                attendee_email=attendee_email,
+                amount=pricing["amount"],
+                currency=pricing["currency"],
+                metadata=enriched_metadata,
+            )
+        except IntegrationError as exc:
+            self.session.rollback()
+            raise PaymentProcessingError(
+                "Le paiement a échoué. Aucune inscription confirmée."
+            ) from exc
+        payment_payload = response.get("payment", response)
+        payment_id = payment_payload.get("id") or payment_payload.get("payment_id")
+        status = payment_payload.get("status", "captured")
+        return {
+            "id": payment_id,
+            "status": status,
+            "amount": pricing["amount"],
+            "currency": pricing["currency"],
+        }
+
+    def _refund_payment(
+        self,
+        event: Event,
+        payment_info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self.payment_client is None:  # pragma: no cover - guardrail
+            raise PaymentProcessingError("Service de paiement indisponible.")
+        payment_id = payment_info.get("id")
+        if not payment_id:
+            return payment_info
+        try:
+            response = self.payment_client.refund_payment(
+                payment_id,
+                reason=f"Annulation inscription événement {event.id}",
+            )
+        except IntegrationError as exc:
+            self.session.rollback()
+            raise PaymentProcessingError(
+                "Le remboursement a échoué. Statut de l'inscription inchangé."
+            ) from exc
+        updated = dict(payment_info)
+        updated["status"] = response.get("status", "refunded")
+        if "refund" in response:
+            updated["refund"] = response["refund"]
+        else:
+            updated["refund"] = response
+        return updated
+
     def _promote_waitlist_if_possible(self, event: Event) -> List[Registration]:
         capacity = event.attendees if event.attendees is not None else 0
         if capacity == 0:
@@ -342,13 +474,26 @@ class RegistrationService:
         )
         entries: Iterable[WaitlistEntry] = self.session.scalars(query).all()
         promoted: List[Registration] = []
+        pricing = self._extract_pricing(event)
         for entry in entries:
+            metadata_payload: Dict[str, Any] = {}
             registration = self._create_registration(
                 event,
                 email=entry.attendee_email,
                 full_name=entry.attendee_name,
-                metadata=None,
+                metadata=json.dumps(metadata_payload, sort_keys=True),
             )
+            if pricing:
+                payment_metadata = self._capture_payment(
+                    event,
+                    registration,
+                    pricing,
+                    attendee_email=entry.attendee_email,
+                    metadata=metadata_payload,
+                )
+                metadata_payload["payment"] = payment_metadata
+                registration.metadata = json.dumps(metadata_payload, sort_keys=True)
+                self.session.flush()
             self.session.delete(entry)
             promoted.append(registration)
         return promoted
@@ -399,7 +544,9 @@ class RegistrationService:
         }
 
     def _serialize_registration(self, registration: Registration) -> Dict[str, Any]:
-        return {
+        metadata_payload = self._metadata_as_dict(registration.metadata)
+        payment_info = metadata_payload.get("payment")
+        payload = {
             "id": registration.id,
             "event_id": registration.event_id,
             "email": registration.attendee_email,
@@ -409,6 +556,14 @@ class RegistrationService:
             "token": registration.check_in_token,
             "created_at": registration.created_at.isoformat(),
         }
+        if isinstance(payment_info, dict):
+            payload["payment"] = {
+                "id": payment_info.get("id"),
+                "status": payment_info.get("status"),
+                "amount": payment_info.get("amount"),
+                "currency": payment_info.get("currency"),
+            }
+        return payload
 
     def _serialize_waitlist_entry(self, entry: WaitlistEntry) -> Dict[str, Any]:
         return {
@@ -451,12 +606,12 @@ class RegistrationScheduler:
              self._started = False
 
      def _reminder_job(self) -> None:
-         session = get_session()
-         try:
-             service = RegistrationService(session)
-             service.send_reminders()
-         finally:
-             session.close()
+        session = get_session()
+        try:
+            service = RegistrationService(session)
+            service.send_reminders()
+        finally:
+            session.close()
 
      def _waitlist_job(self) -> None:
          session = get_session()

@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from src.integrations.base import IntegrationError
+from src.integrations.calendar_service import CalendarServiceClient
+from src.integrations.email_service import EmailServiceClient
+from src.integrations.social_service import SocialServiceClient
 from src.models import EventCategory, EventSeries, EventTag
 from src.repositories.catalogs import (
     CategoryRepository,
@@ -108,13 +112,23 @@ class EventNotFoundError(Exception):
 class EventService:
     """High level operations for managing events."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        calendar_client: Optional[CalendarServiceClient] = None,
+        email_client: Optional[EmailServiceClient] = None,
+        social_client: Optional[SocialServiceClient] = None,
+    ) -> None:
         self.session = session
         self.repository = EventRepository(session)
         self.category_repository = CategoryRepository(session)
         self.tag_repository = TagRepository(session)
         self.series_repository = SeriesRepository(session)
         self.template_repository = TemplateRepository(session)
+        self.calendar_client = calendar_client or CalendarServiceClient()
+        self.email_client = email_client or EmailServiceClient()
+        self.social_client = social_client or SocialServiceClient()
 
     # ------------------------------------------------------------------
     # Public API
@@ -914,6 +928,14 @@ class EventService:
                 message=message,
             )
 
+        if new_status == "approved":
+            try:
+                self._handle_event_approval(event)
+            except IntegrationError as exc:
+                raise ApprovalWorkflowError(
+                    "Synchronisation externe impossible : " + str(exc)
+                ) from exc
+
         self.session.commit()
         return {
             "event": self._serialize_event(event),
@@ -1037,6 +1059,98 @@ class EventService:
         if series is None:
             return None
         return {"id": series.id, "name": series.name, "description": series.description}
+
+    def _handle_event_approval(self, event) -> None:
+        self._sync_with_calendars(event)
+        self._send_approval_email(event)
+        self._publish_to_social(event)
+
+    def _sync_with_calendars(self, event) -> None:
+        payload = {
+            "event": self._serialize_event(event),
+            "ics": self._build_ics_document(event),
+            "webhooks": self._calendar_webhooks(event),
+        }
+        self.calendar_client.sync_event(payload)
+
+    def _calendar_webhooks(self, event) -> List[str]:
+        settings = self._ensure_settings_dict(event)
+        webhooks = settings.get("calendar_webhooks") if isinstance(settings, dict) else None
+        if not isinstance(webhooks, list):
+            return []
+        clean: List[str] = []
+        for item in webhooks:
+            if isinstance(item, str) and item.strip():
+                clean.append(item.strip())
+        return clean
+
+    def _build_ics_document(self, event) -> str:
+        dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        if event.event_date:
+            dtstart = event.event_date.strftime("%Y%m%d")
+        else:
+            dtstart = datetime.utcnow().strftime("%Y%m%d")
+        summary = self._escape_ics(event.title)
+        description = self._escape_ics(event.description or "")
+        location = self._escape_ics(event.location or "")
+        return "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//Meetinity//Event Service//EN",
+                "BEGIN:VEVENT",
+                f"UID:{event.id}@meetinity.events",
+                f"DTSTAMP:{dtstamp}",
+                f"DTSTART;VALUE=DATE:{dtstart}",
+                f"SUMMARY:{summary}",
+                f"DESCRIPTION:{description}",
+                f"LOCATION:{location}",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ]
+        )
+
+    @staticmethod
+    def _escape_ics(value: str) -> str:
+        return (
+            value.replace("\\", "\\\\")
+            .replace(",", "\\,")
+            .replace(";", "\\;")
+            .replace("\n", "\\n")
+        )
+
+    def _send_approval_email(self, event) -> None:
+        if not event.organizer_email:
+            return
+        settings = self._ensure_settings_dict(event)
+        bookmarks = self._extract_bookmarks(settings)
+        share_payload = self._build_share_payload(event, settings, bookmarks)
+        payload = {
+            "to": event.organizer_email,
+            "template": "event-approved",
+            "variables": {
+                "event_title": event.title,
+                "event_date": event.event_date.isoformat() if event.event_date else None,
+                "event_url": share_payload.get("url"),
+            },
+        }
+        self.email_client.send_notification(payload)
+
+    def _publish_to_social(self, event) -> None:
+        settings = self._ensure_settings_dict(event)
+        bookmarks = self._extract_bookmarks(settings)
+        share_payload = self._build_share_payload(event, settings, bookmarks)
+        payload = {
+            "event_id": event.id,
+            "title": event.title,
+            "message": share_payload.get("message"),
+            "url": share_payload.get("url"),
+            "hashtags": share_payload.get("hashtags", []),
+        }
+        accounts = settings.get("social_accounts") if isinstance(settings, dict) else None
+        if isinstance(accounts, list):
+            payload["accounts"] = [acc for acc in accounts if isinstance(acc, str)]
+        self.social_client.publish_event(payload)
 
     @staticmethod
     def _serialize_category(category) -> Dict[str, Any]:
