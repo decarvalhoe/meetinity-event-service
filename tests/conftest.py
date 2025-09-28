@@ -1,5 +1,4 @@
 import os
-import os
 import sys
 from pathlib import Path
 
@@ -10,6 +9,24 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from src.database import Base, get_engine, get_session, init_engine
 from src.main import app
 from src.services.events import EventService
+
+
+class StubUserProfileClient:
+    def __init__(self):
+        self.profiles = {
+            "user-geo": {
+                "preferred_categories": ["Tech"],
+                "preferred_tags": ["python"],
+                "preferred_languages": ["fr-FR", "en-US"],
+                "location": {"lat": 48.8566, "lon": 2.3522},
+                "radius_km": 500,
+                "bookmarked_events": [],
+            }
+        }
+
+    def get_user_profile(self, user_id: str):
+        return self.profiles.get(user_id, {})
+
 
 DEFAULT_EVENTS = [
     {
@@ -68,5 +85,8 @@ def seed_default_events():
 @pytest.fixture
 def client(seed_default_events):
     app.config["TESTING"] = True
+    app.config["EVENTS_INDEX"] = "events-test"
+    app.config["SEARCH_CLIENT"] = None
+    app.config["USER_PROFILE_CLIENT"] = StubUserProfileClient()
     with app.test_client() as client:
         yield client

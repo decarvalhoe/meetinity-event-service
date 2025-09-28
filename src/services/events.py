@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from src.models import EventCategory, EventSeries, EventTag
 from src.repositories.catalogs import (
@@ -34,6 +35,7 @@ __all__ = [
 LOCALE_PATTERN = re.compile(r"^[a-z]{2}(?:[-_][A-Z]{2})?$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 ALLOWED_STATUSES = {"draft", "pending", "approved", "rejected"}
+DEFAULT_SHARE_BASE_URL = "https://meetinity.events"
 
 
 def is_valid_locale(value: str) -> bool:
@@ -117,6 +119,12 @@ class EventService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def _get_event_model(self, event_id: int):
+        try:
+            return self.repository.get_event(event_id)
+        except LookupError as exc:
+            raise EventNotFoundError(str(exc)) from exc
+
     def list_events(
         self,
         *,
@@ -363,6 +371,48 @@ class EventService:
             raise ValidationError({"locale": [str(exc)]}) from exc
 
         self.session.commit()
+
+    def bookmark_event(self, event_id: int, user_id: str) -> Dict[str, Any]:
+        event = self._get_event_model(event_id)
+        normalized_user = self._validate_user_id(user_id)
+        settings = self._ensure_settings_dict(event)
+        bookmarks = self._extract_bookmarks(settings)
+        if normalized_user not in bookmarks:
+            bookmarks.append(normalized_user)
+        settings["bookmarks"] = list(dict.fromkeys(bookmarks))
+        event.settings = settings if settings else None
+        flag_modified(event, "settings")
+        self.session.commit()
+        return {
+            "event_id": event.id,
+            "bookmarked": True,
+            "total": len(settings.get("bookmarks", [])),
+        }
+
+    def remove_bookmark(self, event_id: int, user_id: str) -> Dict[str, Any]:
+        event = self._get_event_model(event_id)
+        normalized_user = self._validate_user_id(user_id)
+        settings = self._ensure_settings_dict(event)
+        bookmarks = self._extract_bookmarks(settings)
+        if normalized_user in bookmarks:
+            bookmarks = [value for value in bookmarks if value != normalized_user]
+            if bookmarks:
+                settings["bookmarks"] = bookmarks
+            else:
+                settings.pop("bookmarks", None)
+        event.settings = settings if settings else None
+        flag_modified(event, "settings")
+        self.session.commit()
+        return {
+            "event_id": event.id,
+            "bookmarked": False,
+            "total": len(settings.get("bookmarks", [])),
+        }
+
+    def list_bookmarks(self, event_id: int) -> List[str]:
+        event = self._get_event_model(event_id)
+        settings = event.settings if isinstance(event.settings, dict) else {}
+        return self._extract_bookmarks(settings)
 
     def submit_for_approval(self, event_id: int, actor: Optional[str], notes: Optional[str]) -> Dict[str, Any]:
         return self._transition_status(event_id, "pending", actor, notes)
@@ -792,7 +842,10 @@ class EventService:
         }
 
     def _serialize_event(self, event) -> Dict[str, Any]:
-        return {
+        settings_copy = copy.deepcopy(event.settings) if event.settings else {}
+        bookmarks = self._extract_bookmarks(settings_copy)
+        share_payload = self._build_share_payload(event, settings_copy, bookmarks)
+        payload = {
             "id": event.id,
             "title": event.title,
             "date": event.event_date.isoformat() if event.event_date else None,
@@ -806,7 +859,7 @@ class EventService:
             "default_locale": event.default_locale,
             "fallback_locale": event.fallback_locale,
             "organizer_email": event.organizer_email,
-            "settings": copy.deepcopy(event.settings) if event.settings else None,
+            "settings": settings_copy if settings_copy else None,
             "series": self._serialize_series(event.series),
             "template_id": event.template_id,
             "categories": [self._serialize_category(category) for category in event.categories],
@@ -814,7 +867,77 @@ class EventService:
             "translations": [self._serialize_translation(t, event) for t in event.translations],
             "created_at": self._serialize_datetime(event.created_at),
             "updated_at": self._serialize_datetime(event.updated_at),
+            "bookmark_count": len(bookmarks),
+            "share": share_payload,
         }
+        return payload
+
+    @staticmethod
+    def _validate_user_id(user_id: str) -> str:
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValidationError({"user_id": ["Identifiant utilisateur requis."]})
+        return user_id.strip()
+
+    @staticmethod
+    def _ensure_settings_dict(event) -> Dict[str, Any]:
+        if isinstance(event.settings, dict):
+            return copy.deepcopy(event.settings)
+        return {}
+
+    @staticmethod
+    def _extract_bookmarks(settings: Dict[str, Any]) -> List[str]:
+        bookmarks_raw = settings.get("bookmarks") if isinstance(settings, dict) else None
+        if not bookmarks_raw:
+            return []
+        normalized: List[str] = []
+        for entry in bookmarks_raw:
+            if isinstance(entry, str):
+                value = entry.strip()
+            else:
+                value = str(entry).strip()
+            if value and value not in normalized:
+                normalized.append(value)
+        return normalized
+
+    def _build_share_payload(
+        self,
+        event,
+        settings: Dict[str, Any],
+        bookmarks: List[str],
+    ) -> Dict[str, Any]:
+        base_url = None
+        if isinstance(settings, dict):
+            base_url = settings.get("share_base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            base_url = DEFAULT_SHARE_BASE_URL
+        base_url = base_url.rstrip("/")
+        url = f"{base_url}/events/{event.id}"
+        event_date = event.event_date.isoformat() if event.event_date else None
+        hashtags = []
+        for category in event.categories:
+            if category.name:
+                hashtags.append(self._normalise_hashtag(category.name))
+        for tag in event.tags:
+            if tag.name:
+                hashtags.append(self._normalise_hashtag(tag.name))
+        message_parts = [event.title]
+        if event_date:
+            message_parts.append(event_date)
+        location = event.location
+        if location:
+            message_parts.append(location)
+        message = " - ".join(part for part in message_parts if part)
+        return {
+            "url": url,
+            "title": event.title,
+            "message": message,
+            "hashtags": [f"#{tag}" for tag in hashtags[:5]],
+            "bookmark_count": len(bookmarks),
+        }
+
+    @staticmethod
+    def _normalise_hashtag(value: str) -> str:
+        return value.replace("#", "").replace(" ", "").strip()
 
     @staticmethod
     def _serialize_series(series) -> Optional[Dict[str, Any]]:
