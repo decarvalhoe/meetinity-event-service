@@ -4,6 +4,13 @@ from flask import Flask, jsonify, request, g
 
 from src.database import get_session, init_engine
 from src.services.events import EventNotFoundError, EventService, ValidationError
+from src.services.registrations import (
+    CheckInError,
+    DuplicateRegistrationError,
+    PenaltyActiveError,
+    RegistrationClosedError,
+    RegistrationService,
+)
 
 app = Flask(__name__)
 
@@ -22,12 +29,23 @@ def get_event_service() -> EventService:
     return g.event_service
 
 
+def get_registration_service() -> RegistrationService:
+    """Return a lazily initialised :class:`RegistrationService`."""
+
+    if "db_session" not in g:
+        g.db_session = get_session()
+    if "registration_service" not in g:
+        g.registration_service = RegistrationService(g.db_session)
+    return g.registration_service
+
+
 @app.teardown_appcontext
 def shutdown_session(exception):
     """Ensure the SQLAlchemy session is properly closed after each request."""
 
     session = g.pop("db_session", None)
     g.pop("event_service", None)
+    g.pop("registration_service", None)
     if session is not None:
         try:
             if exception is not None:
@@ -175,6 +193,115 @@ def update_event(event_id):
         return error_response(422, exc.message, exc.errors)
 
     return jsonify({"message": "Event updated", "event": updated_event})
+
+
+@app.route("/events/<int:event_id>/registrations", methods=["GET", "POST"])
+def manage_registrations(event_id: int):
+    service = get_registration_service()
+
+    if request.method == "GET":
+        try:
+            registrations = service.list_registrations(event_id)
+        except LookupError:
+            return error_response(404, "Événement introuvable.")
+        return jsonify({"registrations": registrations})
+
+    if not request.is_json:
+        return error_response(415, "Content-Type 'application/json' requis.")
+
+    data = request.get_json(silent=True) or {}
+    email = data.get("email")
+    name = data.get("name")
+    metadata = data.get("metadata") if isinstance(data, dict) else None
+
+    if not isinstance(email, str) or not email.strip():
+        return error_response(422, "Validation échouée.", {"email": ["Adresse requise."]})
+
+    try:
+        result = service.register_attendee(
+            event_id,
+            email=email,
+            full_name=name if isinstance(name, str) else None,
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+    except LookupError:
+        return error_response(404, "Événement introuvable.")
+    except RegistrationClosedError as exc:
+        return error_response(409, str(exc))
+    except DuplicateRegistrationError as exc:
+        return error_response(409, str(exc))
+    except PenaltyActiveError as exc:
+        return error_response(403, str(exc))
+    except ValueError as exc:
+        return error_response(422, "Validation échouée.", {"email": [str(exc)]})
+
+    status_code = 201 if result["status"] == "confirmed" else 202
+    return jsonify(result), status_code
+
+
+@app.route("/events/<int:event_id>/registrations/<int:registration_id>", methods=["DELETE"])
+def cancel_registration(event_id: int, registration_id: int):
+    service = get_registration_service()
+    try:
+        result = service.cancel_registration(event_id, registration_id)
+    except LookupError:
+        return error_response(404, "Inscription introuvable.")
+    return jsonify({"message": "Registration cancelled", **result})
+
+
+@app.route("/events/<int:event_id>/waitlist", methods=["GET", "POST"])
+def manage_waitlist(event_id: int):
+    service = get_registration_service()
+    if request.method == "GET":
+        try:
+            waitlist = service.list_waitlist(event_id)
+        except LookupError:
+            return error_response(404, "Événement introuvable.")
+        return jsonify({"waitlist": waitlist})
+
+    try:
+        promoted = service.trigger_waitlist_promotion(event_id)
+    except LookupError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"promoted": promoted})
+
+
+@app.route("/events/<int:event_id>/attendance", methods=["GET", "POST"])
+def manage_attendance(event_id: int):
+    service = get_registration_service()
+    if request.method == "GET":
+        try:
+            attendance = service.list_attendance(event_id)
+        except LookupError:
+            return error_response(404, "Événement introuvable.")
+        return jsonify({"attendance": attendance})
+
+    try:
+        result = service.detect_no_shows(event_id)
+    except LookupError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify(result)
+
+
+@app.route("/check-in/<token>", methods=["POST"])
+def check_in(token: str):
+    service = get_registration_service()
+    metadata = None
+    method = "qr"
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None
+            method_value = payload.get("method")
+            if isinstance(method_value, str) and method_value.strip():
+                method = method_value.strip()
+    try:
+        result = service.check_in_attendee(token, method=method, metadata=metadata)
+    except CheckInError as exc:
+        return error_response(400, str(exc))
+    except LookupError:
+        return error_response(404, "Événement introuvable.")
+    return jsonify({"message": "Check-in enregistré", "attendance": result})
 
 
 @app.errorhandler(404)

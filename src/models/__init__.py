@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -121,6 +122,10 @@ class Event(TimestampMixin, Base):
     location: Mapped[Optional[str]] = mapped_column(String(255))
     event_type: Mapped[Optional[str]] = mapped_column(String(120))
     attendees: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    registration_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    registration_deadline: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     template_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("event_templates.id", ondelete="SET NULL")
     )
@@ -147,6 +152,21 @@ class Event(TimestampMixin, Base):
     )
     approvals: Mapped[List["EventApproval"]] = relationship(
         "EventApproval", back_populates="event", cascade="all, delete-orphan"
+    )
+    registrations: Mapped[List["Registration"]] = relationship(
+        "Registration",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="Registration.created_at",
+    )
+    waitlist_entries: Mapped[List["WaitlistEntry"]] = relationship(
+        "WaitlistEntry",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="WaitlistEntry.created_at",
+    )
+    penalties: Mapped[List["NoShowPenalty"]] = relationship(
+        "NoShowPenalty", back_populates="event", cascade="all, delete-orphan"
     )
 
 
@@ -186,6 +206,93 @@ class EventApproval(TimestampMixin, Base):
     event: Mapped[Event] = relationship("Event", back_populates="approvals")
 
 
+class Registration(TimestampMixin, Base):
+    __tablename__ = "registrations"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id", "attendee_email", name="uq_registration_event_email"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    attendee_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    attendee_name: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(
+        Enum(
+            "confirmed",
+            "checked_in",
+            "cancelled",
+            "no_show",
+            name="registration_status",
+        ),
+        nullable=False,
+        default="confirmed",
+    )
+    check_in_token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    qr_code_data: Mapped[Optional[str]] = mapped_column(Text)
+    metadata: Mapped[Optional[str]] = mapped_column(Text)
+
+    event: Mapped[Event] = relationship("Event", back_populates="registrations")
+    attendance_record: Mapped[Optional["AttendanceRecord"]] = relationship(
+        "AttendanceRecord",
+        back_populates="registration",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class WaitlistEntry(TimestampMixin, Base):
+    __tablename__ = "waitlist_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id", "attendee_email", name="uq_waitlist_event_email"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    attendee_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    attendee_name: Mapped[Optional[str]] = mapped_column(String(255))
+    notified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    event: Mapped[Event] = relationship("Event", back_populates="waitlist_entries")
+
+
+class AttendanceRecord(TimestampMixin, Base):
+    __tablename__ = "attendance_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    registration_id: Mapped[int] = mapped_column(
+        ForeignKey("registrations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    check_in_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    check_in_method: Mapped[Optional[str]] = mapped_column(String(50))
+    scan_payload: Mapped[Optional[str]] = mapped_column(Text)
+
+    registration: Mapped[Registration] = relationship(
+        "Registration", back_populates="attendance_record"
+    )
+
+
+class NoShowPenalty(TimestampMixin, Base):
+    __tablename__ = "no_show_penalties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    attendee_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    event: Mapped[Event] = relationship("Event", back_populates="penalties")
+
+
 __all__ = [
     "Event",
     "EventApproval",
@@ -194,4 +301,8 @@ __all__ = [
     "EventTag",
     "EventTemplate",
     "EventTranslation",
+    "Registration",
+    "WaitlistEntry",
+    "AttendanceRecord",
+    "NoShowPenalty",
 ]
