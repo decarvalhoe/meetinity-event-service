@@ -1,107 +1,86 @@
-# Meetinity Event Service
+# 📅 Meetinity Event Service
 
-This service powers professional event management on the Meetinity platform. It is built with **Flask** and **SQLAlchemy**, and exposes a JSON REST API for creating, searching and updating events.
+## ⚠️ **REPOSITORY ARCHIVED - MOVED TO MONOREPO**
 
-## Overview
+**This repository has been archived and is now read-only.**
 
-- **Frameworks**: Flask 3, SQLAlchemy 2, Alembic
-- **Database**: PostgreSQL by default (SQLite fallback for local development/testing)
-- **Structure**: layered architecture with database, repository and service modules
+### 📍 **New Location**
+All development has moved to the **Meetinity monorepo**:
 
-## Features
+**🔗 https://github.com/decarvalhoe/meetinity**
 
-- Persistent storage of events, categories, tags, templates and series
-- CRUD operations exposed through REST endpoints
-- Validation with rich error messages and consistent HTTP responses
-- Automatic timestamps and status tracking for approvals
-- Service layer encapsulating business logic, including series management
-
-## Project Layout
-
+The Event Service is now located at:
 ```
-src/
-├── database/             # SQLAlchemy engine and session management
-├── main.py               # Flask application and HTTP endpoints
-├── models/               # SQLAlchemy ORM models
-├── repositories/         # Data access abstractions
-└── services/             # Domain services (validation + orchestration)
-migrations/               # Alembic migration scripts
-tests/                    # Pytest suite with database fixtures
+meetinity/services/event-service/
 ```
 
-## Getting Started
+### 🔄 **Migration Complete**
+- ✅ **All code** migrated with complete history
+- ✅ **Service integrations** with calendar, email, and payment systems
+- ✅ **Event management** and registration features
+- ✅ **Search and recommendations** functionality
+- ✅ **CI/CD pipeline** integrated with unified deployment
 
-1. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 🛠️ **For Developers**
 
-2. **Configure the database**
-   Set a `DATABASE_URL` pointing to PostgreSQL or SQLite. Example for SQLite:
-   ```bash
-   export DATABASE_URL=sqlite:///./event_service.db
-   ```
-   PostgreSQL example:
-   ```bash
-   export DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/meetinity_events
-   ```
-
-3. **Run migrations**
-   ```bash
-   alembic upgrade head
-   ```
-
-4. **Start the service**
-   ```bash
-   python src/main.py
-   ```
-   The API listens on `http://localhost:5003` by default.
-
-## Database Migrations
-
-Alembic is configured under the `migrations/` directory.
-
-- Create a new revision:
-  ```bash
-  alembic revision -m "short description"
-  ```
-- Apply migrations:
-  ```bash
-  alembic upgrade head
-  ```
-- Downgrade to a previous revision:
-  ```bash
-  alembic downgrade <revision_id>
-  ```
-
-The migration environment automatically uses the `DATABASE_URL` environment variable. When not provided, it falls back to the same defaults as the application (`sqlite:///./event_service.db`).
-
-## Testing
-
-Pytest is configured to run against a temporary SQLite database with fixtures defined in `tests/conftest.py`.
-
+#### **Clone the monorepo:**
 ```bash
-pytest
+git clone https://github.com/decarvalhoe/meetinity.git
+cd meetinity/services/event-service
 ```
 
-## Environment Variables
+#### **Development workflow:**
+```bash
+# Start all services including database
+docker compose -f docker-compose.dev.yml up
 
-| Variable       | Description                                                      |
-|----------------|------------------------------------------------------------------|
-| `DATABASE_URL` | Full SQLAlchemy URL (e.g. `postgresql+psycopg2://...`). Optional. |
-| `DB_USER`      | PostgreSQL user (used when `DATABASE_URL` is not provided).       |
-| `DB_PASSWORD`  | PostgreSQL password.                                              |
-| `DB_HOST`      | PostgreSQL host.                                                  |
-| `DB_PORT`      | PostgreSQL port.                                                  |
-| `DB_NAME`      | PostgreSQL database name.                                         |
-| `DB_POOL_SIZE` | Optional pool size override (default: 5).                         |
-| `DB_MAX_OVERFLOW` | Optional pool overflow override (default: 10).                 |
+# Event Service specific development
+cd services/event-service
+alembic upgrade head  # Run migrations
+pytest                # Run tests
+```
 
-If `DATABASE_URL` is omitted, the application will assemble one from the `DB_*` variables. When none are set it uses a local SQLite database for convenience.
+### 📚 **Documentation**
+- **Service Documentation**: `meetinity/services/event-service/README.md`
+- **Integration Guide**: `meetinity/services/event-service/docs/integrations.md`
+- **Database Migrations**: `meetinity/services/event-service/migrations/`
+- **Infrastructure Guide**: `meetinity/docs/service-inventory.md`
 
-## Development Tips
+### 🔗 **Integration Features**
+Now available in the monorepo:
+- **Calendar Integration** for event scheduling
+- **Email Service** for notifications and invitations
+- **Payment Processing** for paid events
+- **Social Service** connections and sharing
+- **User Service** integration for attendee management
+- **Matching Service** integration for networking
 
-- Use Alembic for all schema changes.
-- Keep business rules in the service layer (`src/services/`).
-- Repositories should stay focused on data access and querying.
-- Tests rely on the fixtures in `tests/conftest.py` to prepare a clean database per test.
+### 🏗️ **Architecture Benefits**
+The monorepo provides:
+- **Unified CI/CD** for all Meetinity services
+- **Cross-service integration** testing
+- **Consistent event data** management
+- **Centralized notification** systems
+- **Simplified deployment** and configuration
+
+---
+
+**📅 Archived on:** September 29, 2025  
+**🔗 Monorepo:** https://github.com/decarvalhoe/meetinity  
+**📧 Questions:** Please open issues in the monorepo
+
+---
+
+## 📋 **Original Service Description**
+
+The Meetinity Event Service powered professional event management with Flask and SQLAlchemy, providing comprehensive event creation, search, and management capabilities with external service integrations.
+
+**Key features now available in the monorepo:**
+- Event creation, management, and registration
+- CRUD operations with REST API
+- Search and recommendation algorithms
+- Database migrations with Alembic
+- Calendar and scheduling integration
+- Payment processing for paid events
+- Email notifications and invitations
+- Service integrations (calendar, email, payment, social)
